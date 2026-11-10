@@ -607,6 +607,13 @@ F feed cake   ·   Q drop princess
 R turn the camera 90°   ·   SCROLL zoom   ·   V jump
 ESC pause   ·   H help   ·   M mute
 
+PLAYING ONLINE
+
+Pick RED or BLUE on the menu and you drop into a shared room —
+up to 100 players. Solo play is untouched: the tutorial, the siege
+and the AI all run exactly as before when you are not online.
+Your side is balanced by the server, so a lopsided room fills evenly.
+
 SEEING THROUGH WALLS
 
 Anyone the castle hides from you is drawn as an outline:

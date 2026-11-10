@@ -91,6 +91,7 @@ var occtest := false
 var respawntest := false
 var jumptest := false
 var hattest := false
+var nettest := false
 var showsil := false
 var camtest := false
 var sudden_applied := false
@@ -128,6 +129,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if nettest:
+		_run_nettest()
 		return
 	if hattest:
 		_run_hattest()
@@ -184,6 +188,42 @@ func _ready() -> void:
 		start_match(false)
 	elif start_tutorial:
 		start_match(true)
+
+
+func _run_nettest() -> void:
+	# two clients in one room: a raw peer playing RED, and the real Net client
+	# playing BLUE, so the snapshot really contains somebody else.
+	if net == null:
+		_setup_net()
+	var url := "ws://127.0.0.1:8080/ws"
+	var peer := WebSocketPeer.new()
+	peer.connect_to_url(url + "?room=ctptest&name=peer&team=red")
+	var sent := 0
+	var got_peer := false
+	var got_ghost := false
+	var t := 0.0
+	net.room = "ctptest"
+	net.join(1, "me", url)
+	while t < 12.0 and not (got_peer and got_ghost):
+		peer.poll()
+		if peer.get_ready_state() == WebSocketPeer.STATE_OPEN and sent < 60:
+			peer.send_text(JSON.stringify({"t": "s", "x": 30.0, "z": 6.0, "y": 1.0, "c": 1, "h": 240, "a": 1}))
+			sent += 1
+		got_peer = net.peers.size() > 0
+		for id in net.peers.keys():
+			var n = net.peers[id]["node"]
+			if is_instance_valid(n) and n.get_child_count() > 0:
+				got_ghost = true
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	var seen: int = net.peer_count()
+	var welcomed: bool = net.my_id > 0
+	peer.close()
+	net.close()
+	print("[HF] NETTEST welcomed=%s peers=%d ghost_node=%s t=%.1f  %s" % [
+		str(welcomed), seen, str(got_ghost), t,
+		"PASS" if (net.my_id > 0 and got_peer and got_ghost) else "FAIL"])
+	get_tree().quit()
 
 
 func _run_hattest() -> void:
@@ -859,6 +899,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--nettest":
+			nettest = true
 		elif a == "--hattest":
 			hattest = true
 		elif a == "--jumptest":

@@ -84,6 +84,28 @@ a hook near that castle's gate, so a rescue is gate → key → cage → carry.
 Everything is original: generated geometry, flat materials, synthesised
 tones, original title. No assets from any commercial game.
 
+## Online
+
+Live at **https://capturetheprincess.723studios.com** with the room relay at
+**https://capturetheprincess-api.723studios.com**.
+
+- Pick **RED** or **BLUE** on the menu to join a room; the server balances teams
+  first and honours the request second.
+- Rooms hold **100 players** at a **20 Hz** snapshot rate; the wire is compact
+  JSON arrays (a 100-player snapshot is ~4 KB), and the client lerps peers between
+  snapshots instead of predicting them.
+- The client sends its own state at 15 Hz, which is what makes this cheap: the
+  server owns identity, teams and the clock, the client owns its own movement.
+- **Solo is untouched.** Nothing in the net layer runs unless you press a side
+  button, which is why the whole solo test suite still passes unchanged.
+
+Load test (100 clients, one room, 12 s):
+
+```
+node soak.js --clients 100 --seconds 12
+snapshots: 19.9 Hz avg / 19.8 worst · gap p95 51 ms · 63 KB/s per client · 0 errors
+```
+
 ## The map
 
 176 × 116 m, castles at |x| = 56, three bridges. Every castle also has a second
