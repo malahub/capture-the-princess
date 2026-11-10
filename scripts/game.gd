@@ -93,6 +93,9 @@ var jumptest := false
 var hattest := false
 var nettest := false
 var keyflow := false
+var shottest := false
+var fire_at_frame := -1
+var fire_shot: Dictionary = {}
 var showsil := false
 var camtest := false
 var sudden_applied := false
@@ -130,6 +133,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if shottest:
+		_run_shottest()
 		return
 	if keyflow:
 		_run_keyflow()
@@ -192,6 +198,58 @@ func _ready() -> void:
 		start_match(false)
 	elif start_tutorial:
 		start_match(true)
+
+
+func _run_shottest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+
+	# 1. aim at a person: the shot lands on them
+	var shooter := _new_unit(0, "ranger", false)
+	var target := _new_unit(1, "warrior", false)
+	place(shooter, Vector3(-20.0, 0.0, 45.0))
+	place(target, Vector3(-6.0, 0.0, 45.0))
+	units.append(shooter)
+	units.append(target)
+	var hp0: float = target.hp
+	spawn_projectile(shooter, shooter.pos + Vector3(0, 1.25, 0), target.position + Vector3(0, 1.15, 0), "arrow")
+	var n := 0
+	while n < 120 and not projectiles.is_empty():
+		_update_projectiles(dt)
+		n += 1
+	var chest_hit: bool = target.hp < hp0
+
+	# 2. aim at the ground: it flies out and poofs on the terrain, no damage
+	spawn_projectile(shooter, shooter.pos + Vector3(0, 1.25, 0), Vector3(-2.0, 0.0, 45.0), "arrow")
+	var travelled := 0.0
+	var start_x: float = shooter.pos.x
+	n = 0
+	while n < 200 and not projectiles.is_empty():
+		_update_projectiles(dt)
+		if projectiles.size() > 0:
+			travelled = absf((projectiles[0]["pos"] as Vector3).x - start_x)
+		n += 1
+	var ground_poof: bool = projectiles.is_empty() and travelled > 8.0
+
+	# 3. a wall in the way stops the shot
+	var inside := _new_unit(0, "ranger", false)
+	var outside := _new_unit(1, "warrior", false)
+	place(inside, Vector3(-44.0, 0.0, 8.0))
+	place(outside, Vector3(-30.0, 0.0, 8.0))
+	units.append(inside)
+	units.append(outside)
+	var hp1: float = outside.hp
+	spawn_projectile(inside, inside.pos + Vector3(0, 1.25, 0), outside.position + Vector3(0, 1.15, 0), "arrow")
+	n = 0
+	while n < 120 and not projectiles.is_empty():
+		_update_projectiles(dt)
+		n += 1
+	var wall_blocked: bool = is_equal_approx(outside.hp, hp1) and projectiles.is_empty()
+
+	var ok: bool = chest_hit and ground_poof and wall_blocked
+	print("[HF] SHOTTEST chest_hit=%s ground_poof=%s(%.1fm) wall_blocked=%s  %s" % [
+		str(chest_hit), str(ground_poof), travelled, str(wall_blocked), "PASS" if ok else "FAIL"])
+	get_tree().quit()
 
 
 func _run_keyflow() -> void:
@@ -564,31 +622,31 @@ func _run_walltest() -> void:
 
 func _run_attacktest() -> void:
 	start_match(false)
+	# on dry ground: the old test stood them inside the bridge deck, which now
+	# (correctly) stops a shot that flies into it
 	var target := _new_unit(1, "warrior", false)
-	target.pos = Vector3(0, 0, 0)
-	target.position = target.pos
+	place(target, Vector3(-20.0, 0.0, 46.0))
 	units.append(target)
 	var shooter := _new_unit(0, "ranger", false)
-	shooter.pos = Vector3(0, 0, 7)
-	shooter.position = shooter.pos
+	place(shooter, Vector3(-20.0, 0.0, 53.0))
 	units.append(shooter)
 	var dt := 1.0 / 60.0
 	var hp0 := target.hp
 
-	spawn_projectile(shooter, Vector3(0, 1.25, 7), target.pos, "arrow")
+	var chest := target.position + Vector3(0, 1.15, 0)
+	spawn_projectile(shooter, shooter.position + Vector3(0, 1.25, 0), chest, "arrow")
 	for i in 60:
 		_update_projectiles(dt)
 	var hp1 := target.hp
 
-	spawn_projectile(shooter, Vector3(0, 1.35, 9), target.pos, "fire")
+	spawn_projectile(shooter, shooter.position + Vector3(0, 1.35, 0), chest, "fire")
 	for i in 90:
 		_update_projectiles(dt)
 	var hp2 := target.hp
 
 	# melee, for completeness
 	var brute := _new_unit(0, "warrior", false)
-	brute.pos = Vector3(0, 0, -1.8)
-	brute.position = brute.pos
+	place(brute, target.pos + Vector3(0, 0, -1.8))
 	brute.yaw = 0.0
 	units.append(brute)
 	melee_hit(brute, 2.25, 36.0, false)
@@ -781,6 +839,25 @@ func _setup_demo() -> void:
 		zoom = 15.0
 		zoom_target = 15.0
 		cam_focus = Vector3(0, 0, 11.0)
+	elif demo == "shotarc":
+		var sh := _new_unit(0, "ranger", false)
+		place(sh, Vector3(-26.0, 0.0, 46.0))
+		sh.brain = "none"
+		sh.yaw = Core.yaw_to(sh.pos, Vector3(-10.0, 0.0, 46.0))
+		sh.rotation.y = sh.yaw
+		units.append(sh)
+		var tg := _new_unit(1, "warrior", false)
+		place(tg, Vector3(-10.0, 0.0, 46.0))
+		tg.brain = "none"
+		units.append(tg)
+		player.pos = Vector3(-18.0, 0.0, 34.0)
+		player.position = Vector3(-18.0, Terrain.h(-18.0, 34.0), 34.0)
+		zoom = 17.0
+		zoom_target = 17.0
+		cam_focus = Vector3(-18.0, 0.6, 44.0)
+		# fire a couple of shots once the frame is warm
+		fire_at_frame = 12
+		fire_shot = {"owner": sh, "target": tg.position + Vector3(0, 1.15, 0), "kind": "arrow"}
 	elif demo == "keycarry":
 		var kb: Dictionary = keys[1]
 		place(player, Vector3(kb["home"].x + 1.0, 0.0, kb["home"].z))
@@ -976,6 +1053,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--shottest":
+			shottest = true
 		elif a == "--keyflow":
 			keyflow = true
 		elif a == "--nettest":
@@ -1424,6 +1503,7 @@ func _step(dt: float) -> void:
 	_update_respawns(dt)
 	_update_dropped_hats(dt)
 	_update_silhouettes(dt)
+	_maybe_fire_demo()
 	_update_interaction_label()
 	if state == S_TUTORIAL:
 		_update_tutorial(dt)
@@ -1451,7 +1531,7 @@ func _handle_player(dt: float) -> void:
 		cam_right.y = 0.0
 		cam_right = cam_right.normalized()
 		dir = (cam_right * iv.x + cam_fwd * iv.y).normalized()
-	var aim := _mouse_ground()
+	var aim := _mouse_aim()
 	if autoplay:
 		aim = player.pos + Vector3(0, 0, 1)
 		if player.target_unit != null and is_instance_valid(player.target_unit):
@@ -1474,6 +1554,31 @@ func _handle_player(dt: float) -> void:
 		_player_feed()
 	if autoplay:
 		_autoplay_actions()
+
+
+## What the player is pointing at. A unit under the cursor wins (aimed at its
+## chest); otherwise the point on the ground, so a shot into open field lands
+## where the cursor is and poofs on the terrain.
+func _mouse_aim() -> Vector3:
+	var mp := get_viewport().get_mouse_position()
+	var best: Unit = null
+	var best_d := 46.0
+	for u: Unit in units:
+		if not u.alive or u.team == player.team or not is_instance_valid(u):
+			continue
+		var chest: Vector3 = u.position + Vector3(0, 1.15, 0)
+		if camera.is_position_behind(chest):
+			continue
+		var sp: Vector2 = camera.unproject_position(chest)
+		var d: float = sp.distance_to(mp)
+		if d < best_d:
+			best_d = d
+			best = u
+	if best != null:
+		player.target_unit = best
+		return best.position + Vector3(0, 1.15, 0)
+	player.target_unit = null
+	return _mouse_ground()
 
 
 func _mouse_ground() -> Vector3:
@@ -1838,30 +1943,91 @@ func melee_hit(u: Unit, rng: float, dmg: float, force_drop: bool) -> void:
 
 
 func spawn_projectile(owner: Unit, from: Vector3, target: Vector3, kind: String) -> void:
-	var dir := target - from
-	dir.y = 0.0
-	if dir.length() < 0.1:
-		dir = Vector3(sin(owner.yaw), 0, cos(owner.yaw))
-	dir = dir.normalized()
+	var y_off := 1.25 if kind == "arrow" else 1.35
+	var origin := from
+	origin.y = Terrain.h(origin.x, origin.z) + y_off
+	var aim := target
+	# never aim at your own feet: a click right next to you still fires forward
+	var flat := Vector3(aim.x - origin.x, 0.0, aim.z - origin.z)
+	if flat.length() < 4.0:
+		var fwd := Vector3(sin(owner.yaw), 0.0, cos(owner.yaw))
+		aim = origin + fwd * 9.0
+		aim.y = Terrain.h(aim.x, aim.z) + 0.4
+	var floor_y: float = Terrain.h(aim.x, aim.z) + 0.05
+	if aim.y < floor_y:
+		aim.y = floor_y
+	var to := aim - origin
+	var dist: float = maxf(to.length(), 1.0)
+	var dir := to / dist
 	var node := Node3D.new()
 	world.add_child(node)
 	if kind == "arrow":
 		Bld.arrow_model(node)
 	else:
 		Bld.fireball_model(node)
-	var y_off := 1.25 if kind == "arrow" else 1.35
-	from.y = Terrain.h(from.x, from.z) + y_off
-	node.position = from
+	node.position = origin
 	node.rotation.y = atan2(dir.x, dir.z)
+	node.rotation.x = -asin(clampf(dir.y, -1.0, 1.0))
 	projectiles.append({
-		"node": node, "pos": from, "prev": from, "dir": dir, "kind": kind,
-		"team": owner.team, "owner": owner, "life": 2.4,
+		"node": node, "pos": origin, "prev": origin, "dir": dir, "kind": kind,
+		"team": owner.team, "owner": owner, "life": 2.6,
 		"speed": 34.0 if kind == "arrow" else 17.0,
 		"dmg": (24.0 if kind == "arrow" else 32.0) * owner.damage_scale(),
-		"trail": 0.0, "y_off": y_off, "y": from.y,
+		"trail": 0.0, "left": dist, "range": 34.0 if kind == "arrow" else 24.0,
 	})
 	play_sfx(Core.tone(880.0, 0.07, "tri", 0.16, 1400.0) if kind == "arrow"
 		else Core.tone(180.0, 0.22, "noise", 0.18, 90.0), -18.0)
+
+
+## Anything the shot runs into: sparks, a puff, and the projectile is gone.
+func _impact_projectile(p: Dictionary, at: Vector3) -> void:
+	var kind: String = p["kind"]
+	for i in 5:
+		var n := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.05
+		sm.height = 0.10
+		n.mesh = sm
+		n.material_override = Core.mat(Color("ffd9a0") if kind == "arrow" else Color("ff7a33"), 0.5, 0.0, 1.2)
+		n.position = at
+		world.add_child(n)
+		fx.append({"node": n, "vel": Vector3(randf_range(-1.6, 1.6), randf_range(0.4, 2.0), randf_range(-1.6, 1.6)),
+			"life": 0.32, "spin": 4.0, "fade": true})
+	play_sfx(Core.tone(300.0, 0.10, "noise", 0.14, 120.0), -20.0)
+
+
+## Swept 2D segment vs the world's solid rectangles, height-aware, so a shot into
+## a wall stops at the wall instead of passing through it.
+func _segment_hits_solid(a: Vector3, b: Vector3) -> bool:
+	var lo := Vector2(minf(a.x, b.x), minf(a.z, b.z))
+	var hi := Vector2(maxf(a.x, b.x), maxf(a.z, b.z))
+	var box := Rect2(lo, hi - lo)
+	for s in solids:
+		var rr: Rect2 = s["r"]
+		if not rr.intersects(box):
+			continue
+		var top: float = float(s["top"])
+		for i in 5:
+			var t := float(i) / 4.0
+			var q := a.lerp(b, t)
+			if q.y <= top and rr.has_point(Vector2(q.x, q.z)):
+				return true
+	# trees: a trunk stops a shot even though nothing blocks walking through it
+	for tr in Bld.trunks:
+		var tp: Vector3 = tr["p"]
+		if not box.grow(float(tr["r"])).has_point(Vector2(tp.x, tp.z)):
+			continue
+		var top2: float = float(tr["top"])
+		for i in 5:
+			var t2 := float(i) / 4.0
+			var q2 := a.lerp(b, t2)
+			if q2.y > top2:
+				continue
+			var d2 := Vector2(q2.x - tp.x, q2.z - tp.z).length()
+			if d2 <= float(tr["r"]):
+				return true
+	return false
+
 
 
 ## Swept hit test: a fast projectile moves most of a unit per frame, so the
@@ -1877,37 +2043,53 @@ func _projectile_hit_test(p: Dictionary, target_pos: Vector3, radius: float) -> 
 func _update_projectiles(dt: float) -> void:
 	for i in range(projectiles.size() - 1, -1, -1):
 		var p: Dictionary = projectiles[i]
-		p["life"] -= dt
-		var dir: Vector3 = p["dir"]
-		p["prev"] = p["pos"]
-		p["pos"] = p["pos"] + dir * p["speed"] * dt
 		var node: Node3D = p["node"]
 		if not is_instance_valid(node):
 			projectiles.remove_at(i)
 			continue
-		# ease the height: an arrow leaving the parapet should fall to the field,
-		# not teleport down the instant it clears the wall
-		var want_y: float = Terrain.h(p["pos"].x, p["pos"].z) + p["y_off"]
-		p["y"] = lerpf(p["y"], want_y, 1.0 - exp(-7.0 * dt))
-		p["pos"].y = p["y"]
-		node.position = p["pos"]
+		p["life"] = float(p["life"]) - dt
+		var dir: Vector3 = p["dir"]
+		var step: float = float(p["speed"]) * dt
+		p["prev"] = p["pos"]
+		var nxt: Vector3 = (p["pos"] as Vector3) + dir * step
+		p["left"] = float(p["left"]) - step
+		p["pos"] = nxt
+		node.position = nxt
 		node.rotation.y = atan2(dir.x, dir.z)
+		node.rotation.x = -asin(clampf(dir.y, -1.0, 1.0))
 
 		# trail: an arrow at play zoom is a couple of pixels without it
-		p["trail"] -= dt
-		if p["trail"] <= 0.0:
+		p["trail"] = float(p["trail"]) - dt
+		if float(p["trail"]) <= 0.0:
 			p["trail"] = 0.03 if p["kind"] == "arrow" else 0.055
-			_spawn_projectile_trail(p["pos"], p["kind"])
+			_spawn_projectile_trail(nxt, p["kind"])
 
-		var dead: bool = p["life"] <= 0.0
+		# 1. the ground wins first: a shot into open field lands where it lands
+		var gh: float = Terrain.h(nxt.x, nxt.z)
+		if nxt.y <= gh + 0.05:
+			_impact_projectile(p, Vector3(nxt.x, gh + 0.05, nxt.z))
+			node.queue_free()
+			projectiles.remove_at(i)
+			continue
+		# 2. walls, gates and towers
+		if _segment_hits_solid(p["prev"], nxt):
+			_impact_projectile(p, nxt)
+			node.queue_free()
+			projectiles.remove_at(i)
+			continue
+		# 3. people: the shot flies at the height it was aimed at
+		var dead := false
 		for o: Unit in units:
 			if not o.alive or o.team == p["team"]:
 				continue
-			if _projectile_hit_test(p, o.pos, 0.72):
-				o.take_damage(p["dmg"], p["pos"] - dir, false)
+			if absf(nxt.y - (o.position.y + 1.10)) > 1.2:
+				continue
+			if _projectile_hit_test(p, o.pos, 0.75):
+				o.take_damage(p["dmg"], nxt - dir, false)
 				if p["kind"] == "fire":
-					_splash(p["pos"], p["team"], 2.6, 16.0)
+					_splash(nxt, p["team"], 2.6, 16.0)
 					play_sfx(Core.tone(120.0, 0.30, "noise", 0.28, 60.0), -12.0)
+				_impact_projectile(p, nxt)
 				dead = true
 				break
 		if not dead:
@@ -1920,12 +2102,17 @@ func _update_projectiles(dt: float) -> void:
 					if dm["hp"] <= 0.0:
 						dm["node"].visible = false
 						dm["t"] = 5.0
+					_impact_projectile(p, nxt)
 					dead = true
 					break
+		# 4. out of reach
+		if not dead and (float(p["left"]) <= 0.0 or float(p["life"]) <= 0.0):
+			_impact_projectile(p, nxt)
+			dead = true
 		if dead:
-			_spawn_hit_fx(p["pos"], 0.0, p["team"], dir)
 			node.queue_free()
 			projectiles.remove_at(i)
+
 
 
 func _spawn_projectile_trail(at: Vector3, kind: String) -> void:
@@ -2806,7 +2993,7 @@ func _auto_attack(u: Unit, aim: Vector3) -> void:
 	elif u.cls == "mage":
 		reach = 11.0
 	if d <= reach:
-		var shot_at: Vector3 = u.target_unit.pos
+		var shot_at: Vector3 = u.target_unit.position + Vector3(0, 1.15, 0)
 		if u.cls == "ranger":
 			# lead the shot: at 34 m/s an arrow takes long enough that a running
 			# target would otherwise always be missed
@@ -3029,6 +3216,16 @@ func _update_silhouettes(dt: float) -> void:
 			u.show_silhouette(false)
 			continue
 		u.show_silhouette(showsil or _unit_hidden(u))
+
+
+func _maybe_fire_demo() -> void:
+	if fire_at_frame < 0:
+		return
+	if Engine.get_process_frames() >= fire_at_frame and not fire_shot.is_empty():
+		var o: Unit = fire_shot["owner"]
+		if o != null and is_instance_valid(o):
+			spawn_projectile(o, o.position + Vector3(0, 1.25, 0), fire_shot["target"], String(fire_shot["kind"]))
+		fire_shot = {}
 
 
 func _update_camera(dt: float) -> void:

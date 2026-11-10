@@ -132,7 +132,13 @@ static func scatter(root: Node3D) -> void:
 		hedge(root, Vector3(Terrain.HALF_X - 1.5, Terrain.h_terrain(Terrain.HALF_X - 1.5, z), z))
 
 
+## Trunks, for anything that has to stop at a tree (arrows, mostly). Decor is
+## not a collision body, so the shapes are recorded as they are built.
+static var trunks: Array = []
+
+
 static func tree(root: Node3D, p: Vector3, s: float) -> void:
+	trunks.append({"p": p, "r": 0.30 * s, "top": p.y + 2.2 * s})
 	var n := Node3D.new()
 	n.position = p
 	root.add_child(n)
