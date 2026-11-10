@@ -92,6 +92,7 @@ var respawntest := false
 var jumptest := false
 var hattest := false
 var nettest := false
+var keyflow := false
 var showsil := false
 var camtest := false
 var sudden_applied := false
@@ -129,6 +130,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if keyflow:
+		_run_keyflow()
 		return
 	if nettest:
 		_run_nettest()
@@ -188,6 +192,55 @@ func _ready() -> void:
 		start_match(false)
 	elif start_tutorial:
 		start_match(true)
+
+
+func _run_keyflow() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	# the blue key (team 1) lives on the blue shrine; red raiders want it
+	var kb: Dictionary = keys[1]
+	var home: Vector3 = kb["home"]
+
+	# 1. standing near the shrine, E picks it up
+	place(player, Vector3(home.x + 2.4, 0.0, home.z))
+	_player_interact()
+	var picked: bool = player.has_key and int(player.key_team) == 1
+	var carried_model: bool = player.key_model != null and is_instance_valid(player.key_model)
+
+	# 2. carrying means no weapon
+	var swing_before := player.swing
+	player.attack_cd = 0.0
+	player.attack(player.pos + Vector3(0, 0, 2))
+	var no_shoot: bool = player.swing == swing_before
+
+	# 3. E again sets it down, and it is not on the shrine
+	_player_interact()
+	var set_down: bool = not player.has_key and bool(kb["dropped"])
+	var hint_off: bool = key_hint_target() != null
+
+	# 4. off the shrine for 20 s and it goes home
+	place(player, Vector3(home.x + 40.0, 0.0, home.z))
+	for i in int(21.0 / dt):
+		_update_keys(dt)
+	var back_home: bool = (kb["pos"] as Vector3).distance_to(home) < 0.5 and not bool(kb["dropped"])
+	var hint_home: bool = key_hint_target() == null
+
+	# 5. with the key, walking to the cage opens it with no button press
+	place(player, Vector3(home.x + 1.2, 0.0, home.z))
+	_update_keys(dt)
+	var re_taken: bool = player.has_key
+	var pr: Princess = red_princess
+	pr.locked = true
+	var cage_at := Vector3(pr.position.x + 2.0, 0.0, pr.position.z)
+	place(player, cage_at)
+	_update_keys(dt)
+	var auto_open: bool = not pr.locked
+
+	var ok: bool = picked and carried_model and no_shoot and set_down and hint_off 		and back_home and hint_home and re_taken and auto_open
+	print("[HF] KEYFLOW picked=%s model=%s no_shoot=%s setdown=%s hint=%s home_again=%s hint_home=%s retake=%s auto_open=%s  %s" % [
+		str(picked), str(carried_model), str(no_shoot), str(set_down), str(hint_off),
+		str(back_home), str(hint_home), str(re_taken), str(auto_open), "PASS" if ok else "FAIL"])
+	get_tree().quit()
 
 
 func _run_nettest() -> void:
@@ -725,6 +778,27 @@ func _setup_demo() -> void:
 		zoom = 15.0
 		zoom_target = 15.0
 		cam_focus = Vector3(0, 0, 11.0)
+	elif demo == "keycarry":
+		var kb: Dictionary = keys[1]
+		place(player, Vector3(kb["home"].x + 1.0, 0.0, kb["home"].z))
+		_take_key(player, kb)
+		player.has_key = true
+		player.key_team = 1
+		place(player, Vector3(kb["home"].x + 3.2, 0.0, kb["home"].z + 1.2))
+		zoom = 9.0
+		zoom_target = 9.0
+		cam_focus = player.pos + Vector3(0, 1.4, 0)
+	elif demo == "keyhint":
+		var kb2: Dictionary = keys[1]
+		place(player, Vector3(kb2["home"].x + 1.0, 0.0, kb2["home"].z))
+		_take_key(player, kb2)
+		place(player, Vector3(kb2["home"].x + 2.0, 0.0, kb2["home"].z))
+		_set_key_down(player)
+		# walk away so the key is off screen: the edge arrow takes over
+		place(player, Vector3(-34.0, 0.0, 6.0))
+		zoom = 22.0
+		zoom_target = 22.0
+		cam_focus = player.pos + Vector3(0, 0.8, 0)
 	elif demo == "ramp":
 		player.pos = Vector3(-Terrain.RAMP_X, 0.0, Terrain.RAMP_Z)
 		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
@@ -899,6 +973,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--keyflow":
+			keyflow = true
 		elif a == "--nettest":
 			nettest = true
 		elif a == "--hattest":
@@ -988,7 +1064,8 @@ func play_sfx(stream: AudioStream, db: float = -9.0) -> void:
 
 
 func _make_world_labels() -> void:
-	near_lbl = Core.label3d(self, "", Vector3.ZERO, 46, Color("ffd766"))
+	near_lbl = Core.label3d(self, "", Vector3.ZERO, 40, Color("ffd766"))
+	near_lbl.fixed_size = true
 	near_lbl.pixel_size = 0.019
 	near_lbl.no_depth_test = true
 	near_lbl.visible = false
@@ -1172,8 +1249,9 @@ func _spawn_keys() -> void:
 	keys.clear()
 	for t in 2:
 		var c: Dictionary = castles[t]
-		keys.append({"team": t, "pos": Vector3(c["key_pos"].x, 0.0, c["key_pos"].z),
-			"node": c["key_node"], "taken": -1})
+		var kp := Vector3(c["key_pos"].x, 0.0, c["key_pos"].z)
+		keys.append({"team": t, "pos": kp, "home": kp,
+			"node": c["key_node"], "taken": -1, "dropped": false, "t": 0.0})
 
 
 func _spawn_resources() -> void:
@@ -1410,6 +1488,14 @@ func _mouse_ground() -> Vector3:
 func _player_interact() -> void:
 	if player.carrying != null:
 		drop_princess(player)
+		return
+	# putting a carried key down is the same button that picked it up
+	if player.has_key:
+		_set_key_down(player)
+		return
+	var kk := _nearest_key(player.pos, 3.0)
+	if not kk.is_empty():
+		_take_key(player, kk)
 		return
 	var pr := _nearest_princess(player.pos, 3.2, true)
 	if pr != null:
@@ -2204,6 +2290,83 @@ func _gate_reach(u: Unit) -> bool:
 
 
 # ================================================================ keys and cages
+## Where the enemy key is, when it is not sitting on its shrine — the UI draws a
+## marker for it on the minimap and an arrow at the screen edge.
+func key_hint_target() -> Variant:
+	if player == null or not is_instance_valid(player):
+		return null
+	for k in keys:
+		if int(k["team"]) == 1 - player.team:
+			var on_shrine: bool = not bool(k.get("dropped", false)) and k["taken"] == -1 and (k["pos"] as Vector3).distance_to(k["home"]) < 0.5
+			if on_shrine:
+				return null
+			return Vector3(k["pos"].x, Terrain.h(k["pos"].x, k["pos"].z) + 1.6, k["pos"].z)
+	return null
+
+
+func _nearest_key(p: Vector3, rng: float) -> Dictionary:
+	var best := {}
+	var bd := rng
+	for k in keys:
+		if k["taken"] != -1:
+			continue
+		var d: float = p.distance_to(Vector3(k["pos"].x, 0.0, k["pos"].z))
+		if d < bd:
+			bd = d
+			best = k
+	return best
+
+
+func _take_key(u: Unit, k: Dictionary) -> void:
+	if k.is_empty():
+		return
+	k["taken"] = u.get_instance_id()
+	k["dropped"] = false
+	k["t"] = 0.0
+	u.has_key = true
+	u.key_team = int(k["team"])
+	var node: Node3D = k["node"]
+	if is_instance_valid(node):
+		node.visible = false
+	_attach_carried_key(u)
+	play_sfx(Core.tone(760.0, 0.16, "tri", 0.28, 1140.0), -10.0)
+	if u == player:
+		ui.toast("the %s key — walk it to their cage, or E to put it down" % ("red" if k["team"] == 0 else "blue"))
+
+
+func _attach_carried_key(u: Unit) -> void:
+	if u.key_model != null and is_instance_valid(u.key_model):
+		u.key_model.queue_free()
+	u.key_model = Bld.key_rig(u, Vector3(0, 2.62, 0))
+	u.key_model.scale = Vector3(0.85, 0.85, 0.85)
+
+
+## Set the key down where you stand. It keeps for 20 s, then goes home.
+func _set_key_down(u: Unit) -> void:
+	if not u.has_key:
+		return
+	var team := u.key_team
+	for k in keys:
+		if int(k["team"]) != team:
+			continue
+		k["taken"] = -1
+		k["dropped"] = true
+		k["t"] = 20.0
+		k["pos"] = Vector3(u.pos.x, 0.0, u.pos.z)
+		var nd: Node3D = k["node"]
+		if is_instance_valid(nd):
+			nd.visible = true
+			nd.position = Vector3(u.pos.x, Terrain.h(u.pos.x, u.pos.z) - Terrain.PLATEAU_H + 1.2, u.pos.z)
+		break
+	if u.key_model != null and is_instance_valid(u.key_model):
+		u.key_model.queue_free()
+	u.key_model = null
+	u.has_key = false
+	u.key_team = -1
+	if u == player:
+		ui.toast("key set down — it returns to the shrine in 20 s")
+
+
 func _update_keys(dt: float) -> void:
 	# keys float and turn so they read from a distance
 	for k in keys:
@@ -2211,23 +2374,25 @@ func _update_keys(dt: float) -> void:
 		if is_instance_valid(node) and k["taken"] == -1:
 			node.rotation.y += dt * 1.6
 			node.position.y = Terrain.h(k["pos"].x, k["pos"].z) - Terrain.PLATEAU_H + 1.42 				+ sin(Time.get_ticks_msec() * 0.004) * 0.08
+	# a key left on the ground goes back to its shrine after 20 s
+	for k in keys:
+		if not bool(k.get("dropped", false)):
+			continue
+		k["t"] = float(k["t"]) - dt
+		if k["t"] <= 0.0:
+			k["dropped"] = false
+			k["pos"] = k["home"]
+			var home_node: Node3D = k["node"]
+			if is_instance_valid(home_node):
+				home_node.visible = true
+				home_node.position = Vector3(k["home"].x, 2.42, k["home"].z)
 	# auto pickup: walk into the key
 	for u: Unit in units:
 		if not u.alive or u.has_key:
 			continue
-		for k in keys:
-			if k["taken"] != -1:
-				continue
-			if u.pos.distance_to(k["pos"]) < 1.7:
-				k["taken"] = u.get_instance_id()
-				u.has_key = true
-				u.key_team = int(k["team"])
-				var node2: Node3D = k["node"]
-				if is_instance_valid(node2):
-					node2.visible = false
-				if u == player:
-					ui.toast("picked up the %s key — take it to their cage" % ("red" if k["team"] == 0 else "blue"))
-				play_sfx(Core.tone(760.0, 0.16, "tri", 0.28, 1140.0), -10.0)
+		var near := _nearest_key(u.pos, 1.7)
+		if not near.is_empty():
+			_take_key(u, near)
 	# a keyed unit opens the cage it belongs to
 	for pr in [red_princess, blue_princess]:
 		if pr == null or not is_instance_valid(pr) or not pr.locked:
@@ -2357,6 +2522,8 @@ func _drop_key(u: Unit) -> void:
 		if int(k["team"]) != u.key_team:
 			continue
 		k["taken"] = -1
+		k["dropped"] = true
+		k["t"] = 20.0
 		k["pos"] = Vector3(u.pos.x, 0.0, u.pos.z)
 		var nd: Node3D = k["node"]
 		if is_instance_valid(nd):
@@ -2789,6 +2956,17 @@ func _update_interaction_label() -> void:
 		if pr.team != player.team:
 			near_lbl.text = "E — CARRY   ·   F — FEED"
 		near_lbl.position = pr.position + Vector3(0, 3.4, 0)
+		return
+	if player.has_key:
+		near_lbl.visible = true
+		near_lbl.text = "E — SET THE KEY DOWN"
+		near_lbl.position = player.position + Vector3(0, 3.2, 0)
+		return
+	var kk := _nearest_key(player.pos, 3.0)
+	if not kk.is_empty():
+		near_lbl.visible = true
+		near_lbl.text = "E — TAKE THE KEY"
+		near_lbl.position = Vector3(kk["pos"].x, Terrain.h(kk["pos"].x, kk["pos"].z) + 2.2, kk["pos"].z)
 		return
 	var st := _nearest_hat(player.pos, 2.6)
 	if not st.is_empty():

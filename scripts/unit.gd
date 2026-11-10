@@ -23,6 +23,7 @@ var wood := 0                 # building materials, worker only
 var metal := 0
 var gather_t := 0.0
 var repair_t := 0.0
+var key_model: Node3D = null  # the enemy key, held over the head
 var vy := 0.0                 # vertical velocity while jumping
 var airborne := false
 var carrying: Princess = null
@@ -339,6 +340,8 @@ func can_attack() -> bool:
 func attack(aim: Vector3) -> void:
 	if not can_attack():
 		return
+	if has_key:
+		return                      # both hands on the key: no weapon while carrying
 	swing = 1.0
 	match cls:
 		"villager":

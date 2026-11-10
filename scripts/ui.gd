@@ -104,6 +104,12 @@ class MapView extends Control:
 		for cake in game.cakes:
 			if cake["active"]:
 				draw_circle(o + Vector2(cake["pos"].x, cake["pos"].z) * p, 2.6, Color("f6b8cf"))
+		var kt = game.key_hint_target()
+		if kt != null:
+			var kp: Vector3 = kt
+			var kat := o + Vector2(kp.x, kp.z) * p
+			draw_circle(kat, 5.0, Color(1.0, 0.83, 0.28, 0.95))
+			draw_circle(kat, 2.2, Color(0.10, 0.08, 0.05, 0.95))
 		if game.red_princess != null:
 			draw_circle(o + Vector2(game.red_princess.position.x, game.red_princess.position.z) * p, 4.2, REDC)
 		if game.blue_princess != null:
@@ -217,6 +223,44 @@ func panel(parent: Node, rect: Rect2, color: Color = PANEL) -> ColorRect:
 
 # ------------------------------------------------------------ menu
 # ------------------------------------------------------------ unit pictograms
+## Points at the enemy key when it is off the screen: an arrow at the edge with a
+## little key badge, so a dropped or stolen key is never lost.
+class KeyArrow extends Control:
+	var game: Node = null
+	func _draw() -> void:
+		if game == null or game.player == null or not is_instance_valid(game.player):
+			return
+		var tgt = game.key_hint_target()
+		if tgt == null:
+			return
+		var cam: Camera3D = game.camera
+		if cam == null:
+			return
+		var sp := cam.unproject_position(tgt)
+		var vp := get_viewport_rect().size
+		var m := 78.0
+		if sp.x > m and sp.x < vp.x - m and sp.y > m and sp.y < vp.y - m:
+			return
+		var c := vp * 0.5
+		var d := sp - c
+		if d.length() < 0.01:
+			d = Vector2(1, 0)
+		d = d.normalized()
+		var half := vp * 0.5 - Vector2(m, m)
+		var reach := minf(half.x / maxf(absf(d.x), 0.001), half.y / maxf(absf(d.y), 0.001))
+		var pos := c + d * reach
+		var side := Vector2(-d.y, d.x)
+		var tip := pos + d * 20.0
+		var a := pos - d * 6.0 + side * 13.0
+		var b := pos - d * 6.0 - side * 13.0
+		draw_colored_polygon(PackedVector2Array([tip, a, b]), Color(1.0, 0.83, 0.28, 0.95))
+		var g := pos - d * 40.0
+		draw_circle(g, 12.0, Color(0.05, 0.07, 0.11, 0.9))
+		draw_arc(g, 12.0, 0.0, TAU, 22, Color("ffd447"), 2.0)
+		draw_circle(g + Vector2(-3.5, -2.5), 3.4, Color("ffd447"))
+		draw_line(g + Vector2(-1, 1), g + Vector2(5, 7), Color("ffd447"), 2.4)
+
+
 class UnitIcon extends Control:
 	var kind := "warrior"
 	var tint: Color = Color("e8b53f")
@@ -463,6 +507,14 @@ func _build_hud() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hud)
 
+	# edge arrow for a key that is off screen
+	key_arrow = KeyArrow.new()
+	key_arrow.game = game
+	key_arrow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	key_arrow.size = Vector2(1600, 900)
+	key_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(key_arrow)
+
 	# top-left: hero card
 	panel(hud, Rect2(24, 22, 340, 126), Color(0.05, 0.07, 0.11, 0.78))
 	mk_label(hud, "YOU", 16, GOLD, Vector2(40, 30))
@@ -508,6 +560,10 @@ func _build_hud() -> void:
 func update_hud(d: Dictionary) -> void:
 	if not hud.visible:
 		return
+	if key_arrow != null:
+		key_arrow.queue_redraw()
+	if map_view != null:
+		map_view.queue_redraw()
 	var hpf: float = clampf(d.get("hp", 1.0), 0.0, 1.0)
 	hp_bar.size.x = 276.0 * hpf
 	hp_bar.color = Color("57c46a") if hpf > 0.5 else (Color("e8c04a") if hpf > 0.25 else Color("e2544a"))
@@ -708,6 +764,9 @@ func show_menu() -> void:
 	endcard.visible = false
 	tutorial.visible = false
 	ui_guard = 0.5
+
+
+var key_arrow: KeyArrow = null
 
 
 func show_hud() -> void:
