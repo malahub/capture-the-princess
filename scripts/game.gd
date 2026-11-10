@@ -1,0 +1,2895 @@
+extends Node3D
+## Heavy Flag — an isometric 3D siege. Two castles, two kidnapped princesses,
+## and a cake economy that decides how easily either one can be carried home.
+
+const WIN_HOLD := 25.0
+const SUDDEN_AT := 300.0
+const SUDDEN_HOLD := 9.0
+const MATCH_RESPAWN := 8.0
+const ALLY_RESPAWN := 6.0
+const PLAYER_RESPAWN := 4.0
+const ORTHO_SIZE := 30.0
+
+enum { S_MENU, S_TUTORIAL, S_PLAY, S_PAUSE, S_OVER }
+
+var state: int = S_MENU
+var world: Node3D
+var units: Array = []
+var player: Unit = null
+var red_princess: Princess = null
+var blue_princess: Princess = null
+var castles: Array = [{}, {}]
+var solids: Array = []
+var cakes: Array = []
+var hats: Array = []
+var gates: Array = []
+var keys: Array = []
+var resources: Array = []
+var dropped_hats: Array = []
+var projectiles: Array = []
+var throws: Array = []
+var fx: Array = []
+var dummies: Array = []
+var camera: Camera3D
+var ui: UI
+
+var sudden := false
+var hold_target := WIN_HOLD
+var hold_red := 0.0
+var hold_blue := 0.0
+var hold_active := -1
+var match_time := 0.0
+var match_start_ms := 0
+var respawn_queue: Array = []
+var cam_focus := Vector3.ZERO
+var demo_focus := Vector3.ZERO
+var demo_zoom := 0.0
+var cam_dir := Vector3(0.72, 0.82, 0.72).normalized()
+const CAM_HORIZ := 0.72
+const CAM_HEIGHT := 0.82
+var cam_yaw := PI * 0.25
+var cam_yaw_target := PI * 0.25
+var zoom := ORTHO_SIZE
+var zoom_target := ORTHO_SIZE
+var shake := 0.0
+var menu_t := 0.0
+var near_lbl: Label3D
+var hint_lbl: Label3D
+var tutorial_step := 0
+var tutorial_done := false
+var tut_progress := 0.0
+var tut_last_pos := Vector3.ZERO
+var tut_zoom_seen := false
+var sfx_noted := false
+
+# headless / automation
+var sfx: Array = []
+var sfx_i := 0
+var muted := true   # beta builds start silent; M toggles
+var shot_path := ""
+var shot_frame := 0
+var frame_count := 0
+var autoplay := false
+var simtest := 0.0
+var dbg_t := 0.0
+var start_play := false
+var start_tutorial := false
+var start_help := false
+var _last_goal := Vector3.ZERO
+var _last_want := Vector3.ZERO
+var demo := ""
+var demo_fired := false
+var click_target := ""
+var movetest := false
+var keytest := false
+var attacktest := false
+var walltest := false
+var siegetest := false
+var synergytest := false
+var wintest := false
+var occtest := false
+var respawntest := false
+var jumptest := false
+var hattest := false
+var showsil := false
+var camtest := false
+var sudden_applied := false
+var input_debug := false
+var spawn_at := Vector3(9999, 0, 0)
+var autoplay_t := 0.0
+
+
+func _ready() -> void:
+	AudioServer.set_bus_mute(0, muted)
+	print("[HF] boot build 1")
+	Core.setup_input()
+	_parse_args()
+	Bld.make_env(self)
+	world = Node3D.new()
+	world.name = "World"
+	add_child(world)
+	Terrain.build(world)
+	Bld.scatter(world)
+	castles[0] = Bld.castle(world, 0, solids)
+	castles[1] = Bld.castle(world, 1, solids)
+	_make_camera()
+	_make_ui()
+	_make_audio()
+	_make_world_labels()
+	spawn_princesses()
+	start_menu()
+	if OS.has_feature("web"):
+		var q := str(JavaScriptBridge.eval("window.location.search", true))
+		if q.find("autostart=tutorial") >= 0:
+			start_match(true)
+		elif q.find("autostart=play") >= 0:
+			start_match(false)
+	if simtest > 0.0:
+		autoplay = true
+		_run_simtest()
+		return
+	if hattest:
+		_run_hattest()
+		return
+	if jumptest:
+		_run_jumptest()
+		return
+	if respawntest:
+		_run_respawntest()
+		return
+	if occtest:
+		_run_occtest()
+		return
+	if camtest:
+		_run_camtest()
+		return
+	if wintest:
+		_run_wintest()
+		return
+	if synergytest:
+		_run_synergytest()
+		return
+	if siegetest:
+		_run_siegetest()
+		return
+	if walltest:
+		_run_walltest()
+		return
+	if attacktest:
+		_run_attacktest()
+		return
+	if keytest:
+		_run_keytest()
+		return
+	if movetest:
+		_run_movetest()
+		return
+	if demo != "":
+		start_match(false)
+		_setup_demo()
+	if start_help:
+		ui.help.visible = true
+	if click_target != "":
+		await get_tree().create_timer(1.0).timeout
+		print("[HF] synthetic click: ", click_target)
+		if click_target == "tutorial":
+			ui._fire(ui.tutorial_pressed)
+		elif click_target == "play":
+			ui._fire(ui.play_pressed)
+		elif click_target == "help":
+			ui.help.visible = true
+	if autoplay or start_play:
+		start_match(false)
+	elif start_tutorial:
+		start_match(true)
+
+
+func _run_hattest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var spawn_worker: bool = player.cls == "worker"
+	var stands: int = hats.size() / 2
+	# take a warrior hat off its stand
+	var st := {}
+	for h in hats:
+		if int(h["team"]) == 0 and String(h["cls"]) == "warrior":
+			st = h
+			break
+	place(player, st["pos"])
+	_player_interact()
+	var got_hat: bool = player.cls == "warrior"
+	# die, and check the hat falls and you come back hatless
+	player.take_damage(9999.0, player.pos + Vector3(0, 0, 4), false)
+	var fell: bool = dropped_hats.size() > 0
+	var fell_cls: String = String(dropped_hats[0]["cls"]) if fell else ""
+	var t := 0.0
+	while not player.alive and t < 30.0:
+		_update_respawns(dt)
+		t += dt
+	var back_worker: bool = player.cls == "worker" and player.alive
+	# and the dropped hat is reclaimable
+	var reclaimed := false
+	if fell and dropped_hats.size() > 0:
+		place(player, dropped_hats[0]["pos"])
+		_update_dropped_hats(dt)
+		reclaimed = player.cls == fell_cls
+	var ok: bool = spawn_worker and stands == 3 and got_hat and fell and back_worker and reclaimed
+	print("[HF] HATTEST spawn_worker=%s stands=%d took=%s dropped=%s(%s) respawn=%s reclaimed=%s  %s" % [
+		str(spawn_worker), stands, str(got_hat), str(fell), fell_cls, str(back_worker), str(reclaimed),
+		"PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_jumptest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	# stand on the assault ramp, outside the red castle's side wall
+	place(player, Vector3(-Terrain.RAMP_X, 0.0, Terrain.RAMP_Z))
+	var start_h: float = Terrain.h(player.pos.x, player.pos.z)
+	var over_wall: bool = start_h > Bld.WALK_H
+	player.start_jump()
+	var t := 0.0
+	while player.airborne and t < 4.0:
+		player.pos.z -= 0.13
+		player.update_unit(dt, Vector3(0.0, 0.0, -1.0), Vector3.ZERO)
+		t += dt
+	var inside: bool = absf(player.pos.x) > 38.0 and absf(player.pos.z) < 17.0
+	var on_floor: bool = absf(player.position.y - Terrain.PLATEAU_H) < 0.6
+	var ok: bool = over_wall and inside and on_floor and not player.airborne
+	print("[HF] JUMPTEST ramp_top=%.2f (wall %.2f) over=%s landed=%s inside=%s floor=%s t=%.2f  %s" % [
+		start_h, Bld.WALK_H, str(over_wall), str(not player.airborne), str(inside), str(on_floor), t,
+		"PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_respawntest() -> void:
+	start_match(false)
+	var spread := {}
+	var wrong_side := 0
+	var on_wall := 0
+	for i in 60:
+		var p := _respawn_point(0)
+		if p.x > -12.0:
+			wrong_side += 1
+		if Terrain.h(p.x, p.z) > Terrain.PLATEAU_H + 0.5:
+			on_wall += 1
+		spread[Vector2i(int(p.x), int(p.z))] = true
+	var blue_side := 0
+	for i in 30:
+		if _respawn_point(1).x < 12.0:
+			blue_side += 1
+	var ok: bool = wrong_side == 0 and blue_side == 0 and on_wall == 0 and spread.size() > 8
+	print("[HF] RESPAWNTEST red_wrong_side=%d blue_wrong_side=%d on_wall=%d distinct=%d/60  %s" % [
+		wrong_side, blue_side, on_wall, spread.size(), "PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_occtest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	cam_yaw = PI * 0.25
+	cam_yaw_target = cam_yaw
+	for i in 40:
+		_update_camera(dt)
+	# behind the west wall of the blue castle
+	var behind := _is_occluded(Vector3(35.5, 1.4, 10.0))
+	# middle of the open field
+	var open := _is_occluded(Vector3(0.0, 1.4, 15.0))
+	# a unit standing on the wall itself must not be occluded by its own wall
+	var onwall := _is_occluded(Vector3(42.0, Bld.WALK_H + 1.2, 0.0))
+	var ok: bool = behind and not open and not onwall
+	print("[HF] OCCTEST behind_wall=%s open_field=%s on_parapet=%s  %s" % [
+		str(behind), str(open), str(onwall), "PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_camtest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	cam_yaw = PI * 0.25
+	cam_yaw_target = cam_yaw
+	for i in 40:
+		_update_camera(dt)
+	var d0 := cam_dir
+	var fwd0 := Vector3(-sin(cam_yaw), 0, -cos(cam_yaw)).normalized()
+	cam_yaw_target += PI * 0.5
+	for i in 60:
+		_update_camera(dt)
+	var d1 := cam_dir
+	var turned := absf(fposmod(rad_to_deg(cam_yaw) - 135.0 + 180.0, 360.0) - 180.0) < 1.0
+	var fwd1 := Vector3(-sin(cam_yaw), 0, -cos(cam_yaw)).normalized()
+	var perp := absf(fwd0.dot(fwd1)) < 0.05
+	# four turns come back to the start
+	for i in 3:
+		cam_yaw_target += PI * 0.5
+		for j in 60:
+			_update_camera(dt)
+	var back := absf(fposmod(rad_to_deg(cam_yaw) - 45.0 + 180.0, 360.0) - 180.0) < 1.0
+	var ok: bool = turned and perp and back
+	print("[HF] CAMTEST yaw=%.0f turned=%s horizontal_fwd_perp=%s full_circle=%s  %s" % [
+		rad_to_deg(cam_yaw), str(turned), str(perp), str(back), "PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_wintest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	# put the red princess on her own throne and let the clock run
+	red_princess.carried_by = null
+	red_princess.locked = false
+	red_princess.position = castles[0]["throne"] + Vector3(0.4, 0, 0.3)
+	var t := 0.0
+	while state == S_PLAY and t < 60.0:
+		_update_holds(dt)
+		_check_end()
+		t += dt
+	var won: bool = state == S_OVER and hold_red >= hold_target - 0.01
+	print("[HF] WINTEST held=%.1f/%.1f t=%.1f over=%s won=%s  %s" % [
+		hold_red, hold_target, t, str(state == S_OVER), str(won), "PASS" if won else "FAIL"])
+	get_tree().quit()
+
+
+func _run_synergytest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+
+	# baseline: no multipliers
+	var w := _new_unit(0, "warrior", false)
+	place(w, castles[0]["court"])
+	units.append(w)
+	var plain: float = w.damage_scale()
+
+	# worker delivers 3 wood + 3 ore to the warrior stand
+	var wk := _new_unit(0, "worker", false)
+	wk.wood = 3
+	wk.metal = 3
+	units.append(wk)
+	var stand := {}
+	for h in hats:
+		if int(h["team"]) == 0 and String(h["cls"]) == "warrior":
+			stand = h
+			break
+	place(wk, stand["pos"])
+	_update_stations(dt)
+	var upgraded: bool = class_upgraded(0, "warrior")
+	var spent: bool = wk.wood == 0 and wk.metal == 0
+	var scaled: float = w.damage_scale()
+
+	# ranger on the wall walk
+	var wall_pos := Vector3.ZERO
+	for d in Terrain.decks:
+		if absf(float(d["h"]) - Bld.WALK_H) < 0.3:
+			var rr: Rect2 = d["r"]
+			wall_pos = Vector3(rr.position.x + rr.size.x * 0.5, 0.0, rr.position.y + rr.size.y * 0.5)
+			break
+	var r := _new_unit(0, "ranger", false)
+	units.append(r)
+	place(r, wall_pos)
+	var onwall: bool = on_wall(r.pos)
+	var high: float = r.damage_scale()
+
+	# shield wall: an ally warrior nearby soaks damage
+	var mate := _new_unit(0, "warrior", false)
+	units.append(mate)
+	place(mate, w.pos + Vector3(2.0, 0, 0))
+	var guarded: float = incoming_scale(w)
+	w.hp = 200.0
+	w.take_damage(100.0, w.pos + Vector3(0, 0, 5), false)
+	var soaked: bool = w.hp > 100.5
+
+	var ok: bool = is_equal_approx(plain, 1.0) and upgraded and spent and scaled > plain 		and onwall and high > 1.3 and guarded < 1.0 and soaked
+	print("[HF] SYNERGYTEST plain=%.2f upgraded=%s spent=%s ->%.2f | wall=%s high=%.2f | guard=%.2f soaked=%s (%d hp)  %s" % [
+		plain, str(upgraded), str(spent), scaled, str(onwall), high, guarded, str(soaked), int(w.hp),
+		"PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_siegetest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var g: Dictionary = gates[0]
+	var gp: Vector3 = g["pos"]
+
+	# 1. a closed gate takes hits and breaks
+	var attacker := _new_unit(1, "warrior", false)
+	place(attacker, Vector3(gp.x + 2.2, 0, gp.z))
+	units.append(attacker)
+	var hp0: float = float(g["hp"])
+	for i in 30:
+		melee_hit(attacker, 2.25, 40.0, false)
+	var hp1: float = float(g["hp"])
+	for i in 60:
+		melee_hit(attacker, 2.25, 40.0, false)
+	var broke: bool = not bool(g["alive"])
+
+	# 2. a worker with materials puts it back up
+	var w := _new_unit(0, "worker", false)
+	place(w, Vector3(gp.x - 2.2, 0, gp.z))
+	# a door under fire cannot be repaired: hold the window open and check
+	w.wood = 4
+	w.metal = 4
+	units.append(w)
+	g["last_hit"] = Time.get_ticks_msec() / 1000.0
+	for i in 60:
+		_update_gates(dt)
+	var under_fire_hp: float = float(g["hp"])
+	units.erase(w)
+	units.append(w)
+	g["last_hit"] = -99.0
+	for i in 600:
+		_update_gates(dt)
+	var fixed: bool = bool(g["alive"]) and float(g["hp"]) > float(g["max"]) * 0.4
+
+	# 3. the key opens the cage
+	var k: Dictionary = keys[1]
+	place(player, k["pos"])
+	_update_keys(dt)
+	var got_key: bool = player.has_key
+	place(player, Vector3(red_princess.position.x + 2.0, 0, red_princess.position.z))
+	for i in 5:
+		_update_keys(dt)
+	var unlocked: bool = not red_princess.locked
+	pick_up(red_princess, player)
+	var carried: bool = player.carrying != null
+
+	var ok: bool = hp1 < hp0 and broke and under_fire_hp <= 0.01 and fixed and got_key and unlocked and carried
+	print("[HF] SIEGETEST gate %.0f->%.0f broke=%s no_repair_under_fire=%s rebuilt=%s (%.0f) | key=%s unlocked=%s carried=%s  %s" % [
+		hp0, hp1, str(broke), str(under_fire_hp <= 0.01), str(fixed), float(g["hp"]), str(got_key), str(unlocked), str(carried),
+		"PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_walltest() -> void:
+	start_match(false)
+	var u := player
+	# red team stairs: local (BACK_X - 4, +3.15) with flip = +1
+	var base := Vector3(-(Bld.BACK_X - 4.0 + Bld.CASTLE_SHIFT), 0.0, 3.2)
+	place(u, base)
+	var h0 := Terrain.h(u.pos.x, u.pos.z)
+	var climbed := false
+	for i in 500:
+		u.pos = move_unit(u.pos, Vector3(0, 0, 0.12), u)
+		if Terrain.h(u.pos.x, u.pos.z) > Bld.WALK_H - 0.5:
+			climbed = true
+			break
+	var h1 := Terrain.h(u.pos.x, u.pos.z)
+	# now try to walk straight off the parapet into the courtyard
+	var before := u.pos
+	for i in 40:
+		u.pos = move_unit(u.pos, Vector3(-0.12, 0, 0), u)
+	var fell := Terrain.h(u.pos.x, u.pos.z) < h1 - 1.0
+	print("[HF] WALLTEST base=%.2f top=%.2f climbed=%s walkh=%.2f off_wall=%s" % [
+		h0, h1, str(climbed), Bld.WALK_H, str(fell)])
+	print("[HF] WALLTEST ", "PASS" if climbed and not fell else "FAIL")
+	get_tree().quit()
+
+
+func _run_attacktest() -> void:
+	start_match(false)
+	var target := _new_unit(1, "warrior", false)
+	target.pos = Vector3(0, 0, 0)
+	target.position = target.pos
+	units.append(target)
+	var shooter := _new_unit(0, "ranger", false)
+	shooter.pos = Vector3(0, 0, 7)
+	shooter.position = shooter.pos
+	units.append(shooter)
+	var dt := 1.0 / 60.0
+	var hp0 := target.hp
+
+	spawn_projectile(shooter, Vector3(0, 1.25, 7), target.pos, "arrow")
+	for i in 60:
+		_update_projectiles(dt)
+	var hp1 := target.hp
+
+	spawn_projectile(shooter, Vector3(0, 1.35, 9), target.pos, "fire")
+	for i in 90:
+		_update_projectiles(dt)
+	var hp2 := target.hp
+
+	# melee, for completeness
+	var brute := _new_unit(0, "warrior", false)
+	brute.pos = Vector3(0, 0, -1.8)
+	brute.position = brute.pos
+	brute.yaw = 0.0
+	units.append(brute)
+	melee_hit(brute, 2.25, 36.0, false)
+	var hp3 := target.hp
+
+	var ok: bool = hp1 < hp0 and hp2 < hp1 and hp3 < hp2
+	print("[HF] ATTACKTEST arrow %.0f->%.0f | fire %.0f->%.0f | melee %.0f->%.0f  %s" % [
+		hp0, hp1, hp1, hp2, hp2, hp3, "PASS" if ok else "FAIL"])
+	get_tree().quit()
+
+
+func _run_keytest() -> void:
+	start_match(false)
+	var results := []
+	for pair in [["move_right", KEY_D, 68], ["move_up", KEY_W, 87], ["act", KEY_E, 69]]:
+		var action: String = pair[0]
+		var kc: int = pair[1]
+		var vk: int = pair[2]
+		var ev := InputEventKey.new()
+		ev.keycode = kc
+		ev.physical_keycode = kc
+		ev.unicode = vk
+		ev.pressed = true
+		Input.parse_input_event(ev)
+		await get_tree().process_frame
+		var held := Input.is_action_pressed(action)
+		var ev2 := InputEventKey.new()
+		ev2.keycode = kc
+		ev2.physical_keycode = kc
+		ev2.pressed = false
+		Input.parse_input_event(ev2)
+		await get_tree().process_frame
+		results.append("%s=%s" % [action, "PASS" if held else "FAIL"])
+	print("[HF] KEYTEST ", " ".join(results))
+	get_tree().quit()
+
+
+func _run_movetest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var p0: Vector3 = player.pos
+	Input.action_press("move_right")
+	for i in 60:
+		_step(dt)
+	Input.action_release("move_right")
+	var d1 := player.pos - p0
+	p0 = player.pos
+	Input.action_press("move_up")
+	for i in 60:
+		_step(dt)
+	Input.action_release("move_up")
+	var d2 := player.pos - p0
+	print("[HF] MOVETEST right=(%.2f,%.2f) up=(%.2f,%.2f)" % [d1.x, d1.z, d2.x, d2.z])
+	var ok := d1.length() > 1.0 and d2.length() > 1.0
+	print("[HF] MOVETEST ", "PASS" if ok else "FAIL")
+	get_tree().quit()
+
+
+func _run_simtest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var steps := int(simtest * 60.0)
+	for i in steps:
+		if state == S_OVER:
+			break
+		_step(dt)
+		if i % 600 == 0:
+			_dbg()
+	print("[HF] SIMTEST END state=%d time=%.1f" % [state, match_time])
+	print("[HF] red=%.1f blue=%.1f redp=%s bluep=%s" % [hold_red, hold_blue, _princess_desc(red_princess), _princess_desc(blue_princess)])
+	get_tree().quit()
+
+
+func _princess_desc(pr: Princess) -> String:
+	if pr == null:
+		return "none"
+	var cb := pr.carried_by
+	var where := "none"
+	if cb != null and is_instance_valid(cb):
+		where = "carried by t%d/pl%d" % [cb.team, 1 if cb.is_player else 0]
+	var dthr := pr.position.distance_to(castles[pr.team]["throne"])
+	return "w%d @%.0f,%.0f cb=%s dthr=%.1f" % [int(pr.weight), pr.position.x, pr.position.z, where, dthr]
+
+
+func _dbg() -> void:
+	var ul := []
+	for u: Unit in units:
+		if not u.alive:
+			continue
+		ul.append("%s%d:%s@%.0f,%.0f/%s" % ["R" if u.team == 0 else "B", 1 if not u.is_player else 0, u.cls.substr(0, 3), u.pos.x, u.pos.z, u.brain])
+	print("[HF] gates R=%.0f/%s B=%.0f/%s keys R=%s B=%s" % [
+		gates[0]["hp"], str(gates[0]["alive"]), gates[1]["hp"], str(gates[1]["alive"]),
+		str(keys[0]["taken"] != -1), str(keys[1]["taken"] != -1)])
+	print("[HF] units " + " ".join(ul))
+	print("[HF] route goal=%s want=%s" % [_last_goal, _last_want])
+	for u: Unit in units:
+		if u.team == 1 and u.brain == "rescuer":
+			print("[HF] rescuer pos=%s wp=%s has=%s tgt=%s stuck=%.1f cake=%d" % [
+				u.pos, u.waypoint, str(u.has_waypoint), str(u.target_unit), u.stuck_t, u.cake])
+			break
+	print("[HF] t=%.1f player=%s hp=%.0f alive=%s rq=%d carry=%s | %s | %s | holdR=%.1f holdB=%.1f" % [
+		match_time, "%.1f,%.1f" % [player.pos.x, player.pos.z] if player != null else "-",
+		player.hp if player != null else 0.0,
+		str(player.alive) if player != null else "-", respawn_queue.size(),
+		player.carrying.title() if (player != null and player.carrying != null) else "-",
+		_princess_desc(red_princess), _princess_desc(blue_princess), hold_red, hold_blue])
+
+
+func _setup_demo() -> void:
+	if demo == "sizes":
+		var i := 0
+		for w in [0.0, 3.0, 6.0, 10.0]:
+			var pr := Princess.new()
+			world.add_child(pr)
+			pr.setup(self, 0, Vector3(-5.4 + float(i) * 3.6, 0.0, 6.0), castles[0]["throne"])
+			pr.add_weight(w)
+			pr.tag.text = ""
+			pr.glow.visible = false
+			i += 1
+		player.pos = Vector3(0.0, 0.0, 13.0)
+		player.position = player.pos
+		zoom = 13.0
+		zoom_target = 13.0
+	elif demo == "chew":
+		var pr := Princess.new()
+		world.add_child(pr)
+		pr.setup(self, 0, Vector3(0.0, 0.0, 9.6), castles[0]["throne"])
+		pr.tag.text = ""
+		pr.add_weight(2.0)
+		player.pos = Vector3(0.0, 0.0, 13.6)
+		player.position = player.pos
+		player.yaw = Core.yaw_to(player.pos, pr.position)
+		player.cake = 3
+		zoom = 10.0
+		zoom_target = 10.0
+		cam_focus = Vector3(0, 0, 11.6)
+	elif demo == "world":
+		place(player, Vector3(0, 0, 0))
+		zoom = 120.0
+		zoom_target = 120.0
+		cam_focus = Vector3(0, 0, 0)
+	elif demo == "siege":
+		place(player, Vector3(34, 0, 0))
+		player.set_class("warrior")
+		zoom = 23.0
+		zoom_target = 23.0
+		cam_focus = Vector3(30, 0, 0)
+	elif demo == "cage":
+		place(player, Vector3(-44, 0, -7))
+		zoom = 14.0
+		zoom_target = 14.0
+	elif demo == "parapet":
+		place(player, Vector3(-54, 0, -6))
+		player.set_class("ranger")
+		zoom = 27.0
+		zoom_target = 27.0
+	elif demo == "river":
+		place(player, Vector3(13, 0, 0))
+		zoom = 30.0
+		zoom_target = 30.0
+		cam_focus = Vector3(6, 0, 0)
+	elif demo == "hill":
+		place(player, Vector3(24, 0, -20))
+		zoom = 26.0
+		zoom_target = 26.0
+		cam_focus = Vector3(24, 0, -20)
+	elif demo == "worldlow":
+		place(player, Vector3(0, 0, 0))
+		zoom = 95.0
+		zoom_target = 95.0
+		cam_focus = Vector3(-16, 0, -10)
+		cam_dir = Vector3(0.9, 0.30, 0.9).normalized()
+	elif demo == "shots":
+		var tgt := _new_unit(1, "warrior", false)
+		tgt.pos = Vector3(0, 0, 7)
+		tgt.position = tgt.pos
+		units.append(tgt)
+		var rr := _new_unit(0, "ranger", false)
+		rr.pos = Vector3(-4.5, 0, 13.5)
+		rr.position = rr.pos
+		rr.yaw = Core.yaw_to(rr.pos, tgt.pos)
+		units.append(rr)
+		var mm := _new_unit(0, "mage", false)
+		mm.pos = Vector3(4.5, 0, 12.5)
+		mm.position = mm.pos
+		mm.yaw = Core.yaw_to(mm.pos, tgt.pos)
+		units.append(mm)
+		player.pos = Vector3(0, 0, 17.5)
+		player.position = player.pos
+		zoom = 15.0
+		zoom_target = 15.0
+		cam_focus = Vector3(0, 0, 11.0)
+	elif demo == "ramp":
+		player.pos = Vector3(-Terrain.RAMP_X, 0.0, Terrain.RAMP_Z)
+		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
+		player.yaw = PI
+		zoom = 40.0
+		zoom_target = 40.0
+		cam_focus = player.pos + Vector3(0, 1.0, 0.0)
+	elif demo == "levels":
+		player.pos = Vector3(-40.0, 0.0, 0.0)
+		player.position = Vector3(-40.0, Terrain.h(-40.0, 0.0), 0.0)
+		zoom = 26.0
+		zoom_target = 26.0
+		cam_focus = player.pos + Vector3(0, 0.5, 0)
+	elif demo == "occ":
+		# two units standing behind the red castle's back wall: one of ours, one
+		# of theirs, so both silhouette colours are in frame
+		var ally := _new_unit(0, "warrior", false)
+		ally.pos = Vector3(-29.6, 0, 5.6)
+		ally.position = Vector3(-29.6, Terrain.h(-29.6, 5.6), 5.6)
+		ally.yaw = 1.5
+		ally.brain = "none"
+		units.append(ally)
+		var foe := _new_unit(1, "ranger", false)
+		foe.pos = Vector3(-29.6, 0, 9.4)
+		foe.position = Vector3(-29.6, Terrain.h(-29.6, 9.4), 9.4)
+		foe.yaw = -1.5
+		foe.brain = "none"
+		units.append(foe)
+		player.pos = Vector3(-44.0, 0.0, 0.0)
+		player.position = Vector3(-44.0, Terrain.h(-44.0, 0.0), 0.0)
+		zoom = 12.0
+		zoom_target = 13.0
+		cam_focus = player.pos + Vector3(0, 0.6, 0.0)
+	elif demo == "lineup2":
+		var dl3 := ["villager", "warrior", "ranger", "mage", "worker"]
+		for i in dl3.size():
+			var u := _new_unit(0, dl3[i], false)
+			var px := -44.9 + float(i) * 1.45
+			u.pos = Vector3(px, 0, -3.0)
+			u.position = Vector3(px, Terrain.h(px, -3.0), -3.0)
+			u.yaw = 0.0
+			u.brain = "none"
+			units.append(u)
+		player.pos = Vector3(-42.2, 0.0, -12.0)
+		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, -11.0), -11.0)
+		zoom = 13.0
+		zoom_target = 13.0
+		cam_focus = Vector3(-39.8, 0.85, -8.5)
+	elif demo == "lineup":
+		# mirrors the proven --demo=shots framing
+		var dl2 := ["villager", "warrior", "ranger", "mage", "worker"]
+		for i in dl2.size():
+			var u := _new_unit(0, dl2[i], false)
+			var px := -6.0 + float(i) * 3.0
+			u.pos = Vector3(px, 0, 13.0)
+			u.position = Vector3(px, Terrain.h(px, 13.0), 13.0)
+			u.yaw = 0.0
+			u.brain = "none"
+			units.append(u)
+		player.pos = Vector3(0.0, 0.0, 20.0)
+		player.position = Vector3(0.0, Terrain.h(0.0, 20.0), 20.0)
+		zoom = 15.0
+		zoom_target = 15.0
+		cam_focus = Vector3(0.0, 0.0, 13.0)
+	elif demo.begins_with("show_"):
+		var who: String = demo.substr(5)
+		var su := _new_unit(0, who, false)
+		su.pos = Vector3(-41.0, 0, 2.0)
+		su.position = Vector3(-41.0, Terrain.h(-41.0, 2.0), 2.0)
+		su.yaw = 0.0
+		su.brain = "none"
+		units.append(su)
+		print("[HF] show unit %s placed %s global %s visible %s" % [who, str(su.pos), str(su.global_position), str(su.visible)])
+		player.pos = Vector3(-41.0, 0.0, 12.0)
+		player.position = Vector3(-41.0, Terrain.h(-41.0, 12.0), 12.0)
+		zoom = 8.0
+		zoom_target = 8.0
+		cam_focus = Vector3(-41.0, 1.05, 2.0)
+	elif demo == "classes":
+		var dl := ["villager", "warrior", "ranger", "mage", "worker"]
+		for i in dl.size():
+			var u := _new_unit(0, dl[i], false)
+			var px := -46.0 + float(i) * 2.5
+			u.pos = Vector3(px, 0, 2.0)
+			u.position = Vector3(px, Terrain.h(px, 2.0), 2.0)
+			u.yaw = 0.0
+			u.brain = "none"
+			units.append(u)
+		player.pos = Vector3(-41.0, 0.0, 12.0)
+		player.position = Vector3(-41.0, Terrain.h(-41.0, 12.0), 12.0)
+		zoom = 12.0
+		zoom_target = 12.0
+		cam_focus = Vector3(-41.0, 1.0, 2.0)
+	elif demo == "feed":
+		player.pos = castles[0]["dungeon"] + Vector3(4.2, 0.0, 3.0)
+		player.position = player.pos
+		player.cake = 3
+		zoom = 12.0
+		zoom_target = 12.0
+
+
+	_lock_demo_cam()
+
+
+func _lock_demo_cam() -> void:
+	demo_focus = cam_focus
+	demo_zoom = zoom
+
+
+func _demo_princess() -> Princess:
+	for pr in [red_princess, blue_princess]:
+		if pr != null and is_instance_valid(pr):
+			pass
+	# the demo princess is the extra one added in _setup_demo, closest to the player
+	var best: Princess = null
+	var bd := 999.0
+	for node in world.get_children():
+		if node is Princess:
+			var pr: Princess = node
+			var d := pr.position.distance_to(player.pos)
+			if d < bd:
+				bd = d
+				best = pr
+	return best
+
+
+func _parse_args() -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--shot-path="):
+			shot_path = a.substr(12)
+		elif a.begins_with("--shot-frame="):
+			shot_frame = int(a.substr(13))
+		elif a == "--autoplay":
+			autoplay = true
+		elif a == "--smoke":
+			autoplay = true
+		elif a == "--inputdebug":
+			input_debug = true
+		elif a == "--showsil":
+			showsil = true
+		elif a == "--hattest":
+			hattest = true
+		elif a == "--jumptest":
+			jumptest = true
+		elif a == "--respawntest":
+			respawntest = true
+		elif a == "--occtest":
+			occtest = true
+		elif a == "--camtest":
+			camtest = true
+		elif a == "--wintest":
+			wintest = true
+		elif a == "--synergytest":
+			synergytest = true
+		elif a == "--siegetest":
+			siegetest = true
+		elif a == "--walltest":
+			walltest = true
+		elif a == "--attacktest":
+			attacktest = true
+		elif a == "--keytest":
+			keytest = true
+		elif a == "--movetest":
+			movetest = true
+		elif a == "--play":
+			start_play = true
+		elif a == "--tutorial":
+			start_tutorial = true
+		elif a.begins_with("--demo="):
+			demo = a.substr(7)
+		elif a == "--help":
+			start_help = true
+		elif a.begins_with("--click="):
+			click_target = a.substr(8)
+		elif a.begins_with("--at="):
+			var parts := a.substr(5).split(",")
+			if parts.size() == 2:
+				spawn_at = Vector3(float(parts[0]), 0.0, float(parts[1]))
+		elif a.begins_with("--simtest="):
+			simtest = float(a.substr(10))
+		elif a.begins_with("--match="):
+			pass
+
+
+func _make_camera() -> void:
+	camera = Camera3D.new()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.size = ORTHO_SIZE
+	camera.near = 0.05
+	camera.far = 400.0
+	add_child(camera)
+	camera.position = cam_dir * 90.0
+	camera.look_at(Vector3.ZERO)
+
+
+func _make_ui() -> void:
+	ui = UI.new()
+	ui.game = self
+	add_child(ui)
+	ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	ui.play_pressed.connect(func(): start_match(false))
+	ui.tutorial_pressed.connect(func(): start_match(true))
+	ui.resume_pressed.connect(func(): _set_pause(false))
+	ui.restart_pressed.connect(func(): start_match(state == S_TUTORIAL))
+	ui.menu_pressed.connect(func(): _set_pause(false); start_menu())
+	if ui.map_view != null:
+		ui.map_view.game = self
+
+
+func _make_audio() -> void:
+	for i in 8:
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		sfx.append(p)
+
+
+func play_sfx(stream: AudioStream, db: float = -9.0) -> void:
+	if sfx.is_empty():
+		return
+	var p: AudioStreamPlayer = sfx[sfx_i % sfx.size()]
+	sfx_i += 1
+	p.stream = stream
+	p.volume_db = db
+	p.play()
+
+
+func _make_world_labels() -> void:
+	near_lbl = Core.label3d(self, "", Vector3.ZERO, 46, Color("ffd766"))
+	near_lbl.pixel_size = 0.019
+	near_lbl.no_depth_test = true
+	near_lbl.visible = false
+	hint_lbl = Core.label3d(self, "", Vector3.ZERO, 40, Color(0.9, 0.95, 1.0, 0.85))
+	hint_lbl.no_depth_test = true
+	hint_lbl.visible = false
+
+
+# ================================================================ match setup
+func start_menu() -> void:
+	_clear_actors()
+	state = S_MENU
+	ui.show_menu()
+	menu_t = 0.0
+	zoom_target = 40.0
+	zoom = 40.0
+	_spawn_scenery_units()
+
+
+func _spawn_scenery_units() -> void:
+	# A few idle soldiers so the menu backdrop is a live scene, not a diorama.
+	for i in 3:
+		var u := _new_unit(0, ["warrior", "ranger", "mage"][i], false)
+		place(u, Vector3(-58 + float(i) * 2.4, 0, -2.0 + float(i) * 1.2))
+		u.yaw = 1.2
+		units.append(u)
+	var b := _new_unit(1, "warrior", false)
+	b.pos = Vector3(8, 0, 4)
+	b.position = b.pos
+	units.append(b)
+
+
+func spawn_princesses() -> void:
+	if red_princess != null and is_instance_valid(red_princess):
+		red_princess.queue_free()
+	if blue_princess != null and is_instance_valid(blue_princess):
+		blue_princess.queue_free()
+	red_princess = Princess.new()
+	world.add_child(red_princess)
+	red_princess.setup(self, 0, castles[1]["dungeon"], castles[0]["throne"])
+	blue_princess = Princess.new()
+	world.add_child(blue_princess)
+	blue_princess.setup(self, 1, castles[0]["dungeon"], castles[1]["throne"])
+
+
+func start_match(is_tutorial: bool) -> void:
+	_clear_actors()
+	match_time = 0.0
+	hold_red = 0.0
+	hold_blue = 0.0
+	hold_target = WIN_HOLD
+	sudden = false
+	hold_active = -1
+	tutorial_step = 0
+	tutorial_done = false
+	tut_last_pos = Vector3.ZERO
+	tut_zoom_seen = false
+	zoom = 27.0
+	zoom_target = 27.0
+	spawn_princesses()
+	_spawn_cakes()
+	_spawn_hats()
+	_spawn_gates()
+	_spawn_keys()
+	_spawn_resources()
+	_spawn_dummies(is_tutorial)
+
+	player = _new_unit(0, "worker", true)
+	place(player, castles[0]["spawn"] + Vector3(0.8, 0, 1.6))
+	if spawn_at.x < 9000.0:
+		place(player, spawn_at)
+	player.position = player.pos
+	player.label.text = ""
+	units.append(player)
+	match_start_ms = Time.get_ticks_msec()
+	tut_last_pos = player.pos
+
+	if is_tutorial:
+		state = S_TUTORIAL
+		ui.show_hud()
+		ui.set_tutorial(1, 7, "MOVE", "WASD or the arrow keys. Scroll to zoom. The camera is isometric and follows you.")
+	else:
+		state = S_PLAY
+		ui.show_hud()
+		ui.hide_tutorial()
+		ui.flash_banner("RESCUE THE RED PRINCESS", Color("e8b53f"), 2.6)
+		# Blue army
+		var roles := ["rescuer", "feeder", "attacker", "attacker", "worker"]
+		var classes := ["warrior", "ranger", "mage", "warrior", "worker"]
+		for i in roles.size():
+			var b := _new_unit(1, classes[i], false)
+			place(b, castles[1]["spawn"] + Vector3(float(i % 2) * 1.6, 0, float(i) * 1.1))
+			b.brain = roles[i]
+			units.append(b)
+		# Red allies: enough bodies to contest four Blue bots
+		var ally_classes := ["warrior", "ranger", "mage", "worker"]
+		var ally_brains := ["ally", "ally", "feeder", "worker"]
+		for i in ally_classes.size():
+			var r := _new_unit(0, ally_classes[i], false)
+			place(r, castles[0]["spawn"] + Vector3(float(i) * 1.8, 0, -1.4 - float(i) * 0.6))
+			r.brain = ally_brains[i]
+			units.append(r)
+	cam_focus = player.pos
+	camera.size = zoom
+	ui.ui_guard = 0.5
+
+
+func _clear_actors() -> void:
+	for u: Unit in units:
+		if is_instance_valid(u):
+			u.queue_free()
+	units.clear()
+	for p in projectiles:
+		if is_instance_valid(p["node"]):
+			p["node"].queue_free()
+	projectiles.clear()
+	for th in throws:
+		if is_instance_valid(th["node"]):
+			th["node"].queue_free()
+	throws.clear()
+	for f in fx:
+		if is_instance_valid(f["node"]):
+			f["node"].queue_free()
+	fx.clear()
+	for c in cakes:
+		if is_instance_valid(c["node"]):
+			c["node"].queue_free()
+	cakes.clear()
+	for h in hats:
+		if is_instance_valid(h["node"]):
+			h["node"].queue_free()
+	hats.clear()
+	for d in dummies:
+		if is_instance_valid(d["node"]):
+			d["node"].queue_free()
+	dummies.clear()
+	for r in resources:
+		if is_instance_valid(r["node"]):
+			r["node"].queue_free()
+	resources.clear()
+	for h in dropped_hats:
+		if is_instance_valid(h["node"]):
+			h["node"].queue_free()
+	dropped_hats.clear()
+	gates.clear()
+	keys.clear()
+	respawn_queue.clear()
+	if red_princess != null and is_instance_valid(red_princess):
+		red_princess.queue_free()
+		red_princess = null
+	if blue_princess != null and is_instance_valid(blue_princess):
+		blue_princess.queue_free()
+		blue_princess = null
+	player = null
+
+
+func place(u: Unit, p: Vector3) -> void:
+	u.pos = Vector3(p.x, 0.0, p.z)
+	u.position = Vector3(p.x, Terrain.h(p.x, p.z), p.z)
+
+
+func _new_unit(team: int, klass: String, is_player: bool) -> Unit:
+	var u := Unit.new()
+	world.add_child(u)
+	u.setup(self, team, klass, is_player)
+	return u
+
+
+func _spawn_gates() -> void:
+	gates.clear()
+	for t in 2:
+		var c: Dictionary = castles[t]
+		gates.append({
+			"team": t, "hp": 700.0, "max": 700.0,
+			"node": c["gate_node"], "rect": c["gate_rect"], "pos": c["gate_pos"],
+			"alive": true, "solid": "gate%d" % t, "open_t": 0.0, "last_hit": -99.0, "sealed": false,
+		})
+
+
+func _spawn_keys() -> void:
+	keys.clear()
+	for t in 2:
+		var c: Dictionary = castles[t]
+		keys.append({"team": t, "pos": Vector3(c["key_pos"].x, 0.0, c["key_pos"].z),
+			"node": c["key_node"], "taken": -1})
+
+
+func _spawn_resources() -> void:
+	for r in resources:
+		if is_instance_valid(r["node"]):
+			r["node"].queue_free()
+	resources.clear()
+	var spots := [
+		["wood", castles[0]["court"] + Vector3(9.0, 0, -13.0)], ["wood", castles[0]["court"] + Vector3(2.0, 0, 14.0)],
+		["metal", castles[0]["court"] + Vector3(-8.0, 0, -14.0)],
+		["wood", castles[1]["court"] + Vector3(-9.0, 0, 13.0)], ["wood", castles[1]["court"] + Vector3(-2.0, 0, -14.0)],
+		["metal", castles[1]["court"] + Vector3(8.0, 0, 14.0)],
+		["wood", Vector3(-19, 0, 21)], ["wood", Vector3(19, 0, -21)],
+		["metal", Vector3(-21, 0, -13)], ["metal", Vector3(21, 0, 13)],
+	]
+	for sp in spots:
+		var kind: String = sp[0]
+		var p: Vector3 = sp[1]
+		var n := Bld.resource_node(world, kind, Vector3(p.x, Terrain.h(p.x, p.z), p.z))
+		resources.append({"kind": kind, "pos": Vector3(p.x, 0.0, p.z), "node": n, "count": 3, "t": 0.0, "active": true})
+
+
+func _spawn_hats() -> void:
+	for t in 2:
+		for h in castles[t]["hats"]:
+			hats.append({"team": t, "pos": Vector3(h["pos"].x, 0.0, h["pos"].z), "cls": h["cls"]})
+
+
+func _spawn_dummies(on: bool) -> void:
+	if not on:
+		return
+	var base: Vector3 = castles[0]["court"]
+	var spots := [base + Vector3(6.0, 0, -4.0), base + Vector3(9.0, 0, -6.0), base + Vector3(3.0, 0, -8.5)]
+	for s in spots:
+		var n := Bld.dummy(world, Vector3(s.x, Terrain.h(s.x, s.z), s.z))
+		dummies.append({"node": n, "pos": Vector3(s.x, 0.0, s.z), "hp": 60.0, "t": 0.0})
+
+
+func _spawn_cakes() -> void:
+	var spots := [
+		Vector3(-40, 0, -16), Vector3(-40, 0, 17), Vector3(-24, 0, 0),
+		Vector3(40, 0, 16), Vector3(40, 0, -17), Vector3(24, 0, 0),
+		Vector3(-13, 0, 34), Vector3(13, 0, -34), Vector3(-15, 0, -26), Vector3(15, 0, 26),
+		Vector3(0, 0, 42), Vector3(0, 0, -42),
+	]
+	for s in spots:
+		_add_cake_pile(s, 2)
+	for t in 2:
+		var d: Vector3 = castles[t]["dungeon"]
+		_add_cake_pile(d + Vector3(0, 0, 4.6), 2)
+
+
+func _add_cake_pile(pos: Vector3, count: int) -> void:
+	var n := Bld.cake_pile(world)
+	n.position = Vector3(pos.x, Terrain.h(pos.x, pos.z), pos.z)
+	# flat pos: unit positions are logic-space (y = 0), props sit on the terrain
+	cakes.append({"node": n, "pos": Vector3(pos.x, 0.0, pos.z), "count": count, "active": true, "t": 0.0})
+
+
+# ================================================================ loop
+func _process(dt: float) -> void:
+	frame_count += 1
+	if demo == "shots" and frame_count == 20:
+		for u: Unit in units:
+			if u.cls == "ranger" and u.team == 0:
+				spawn_projectile(u, u.pos + Vector3(0, 1.25, 0), Vector3(0, 0, 7), "arrow")
+			elif u.cls == "mage" and u.team == 0:
+				spawn_projectile(u, u.pos + Vector3(0, 1.35, 0), Vector3(0, 0, 7), "fire")
+		for pr in projectiles:
+			pr["speed"] = 11.0
+	if demo == "chew" and frame_count == 40:
+		player.cake -= 1
+		throw_cake(player, _demo_princess())
+	if demo == "feed" and not demo_fired and frame_count >= 100:
+		demo_fired = true
+		if blue_princess != null:
+			player.cake -= 1
+			throw_cake(player, blue_princess)
+	if shot_path != "" and frame_count >= shot_frame:
+		print("[SHOT] frame=%d cam.size=%.1f focus=%s vis=%s aabb=%s" % [frame_count, camera.size, cam_focus,
+			str(Terrain.ground_node.is_visible_in_tree()) if Terrain.ground_node != null else "nul",
+			Terrain.ground_node.get_aabb() if Terrain.ground_node != null else Rect2()])
+		var img := get_viewport().get_texture().get_image()
+		img.save_png(shot_path)
+		print("[HF] shot saved ", shot_path)
+		get_tree().quit()
+		return
+
+	_update_camera(dt)
+	_animate_props(dt)
+	if input_debug and ui != null and ui.dbg_label != null:
+		ui.dbg_label.visible = true
+		ui.dbg_label.text = "mr=%.2f pos=%.2f,%.2f vel=%.2f alive=%s st=%d block=%s" % [
+			Input.get_action_strength("move_right"),
+			player.pos.x if player != null else 0.0, player.pos.z if player != null else 0.0,
+			player.vel.length() if player != null else 0.0,
+			str(player.alive) if player != null else "-", state,
+			str(_blocked(player.pos, 0.4)) if player != null else "-"]
+	if autoplay:
+		dbg_t -= dt
+		if dbg_t <= 0.0:
+			dbg_t = 2.0
+			_dbg()
+
+	if state == S_PLAY or state == S_TUTORIAL:
+		_step(dt)
+	elif state == S_MENU:
+		for u: Unit in units:
+			if is_instance_valid(u) and u.alive:
+				u.update_unit(dt, Vector3.ZERO, Vector3.ZERO)
+
+	# the YOU tag is onboarding: it fades out once the player has their bearings
+	if player != null and is_instance_valid(player) and player.you_label != null:
+		var t := (Time.get_ticks_msec() - match_start_ms) * 0.001
+		player.you_label.modulate.a = clampf(1.5 - t / 28.0, 0.0, 1.0)
+	if state != S_OVER:
+		ui.update_hud(_hud_data())
+
+
+func _animate_props(dt: float) -> void:
+	for h in hats:
+		var hc: Dictionary = castles[h["team"]]
+		pass
+	for c in cakes:
+		if c["active"] and is_instance_valid(c["node"]):
+			c["node"].rotation.y += dt * 0.9
+			var glow: Node = c["node"].get_node_or_null("Glow")
+			if glow != null:
+				glow.scale = Vector3.ONE * (0.96 + sin(Time.get_ticks_msec() * 0.003) * 0.06)
+	if red_princess != null and is_instance_valid(red_princess):
+		red_princess.update_princess(dt)
+	if blue_princess != null and is_instance_valid(blue_princess):
+		blue_princess.update_princess(dt)
+
+
+func _step(dt: float) -> void:
+	if demo == "world":
+		return
+	if demo == "shots":
+		# frozen actors: only the projectiles animate, so a frame can be judged
+		_update_projectiles(dt)
+		_update_fx(dt)
+		return
+	match_time += dt
+	_handle_player(dt)
+	_update_ai(dt)
+	for u: Unit in units:
+		if not is_instance_valid(u) or not u.alive:
+			continue
+		if u == player:
+			continue
+		var dir := _ai_dir(u)
+		var aim := u.target_unit.pos if (u.target_unit != null and is_instance_valid(u.target_unit)) else u.waypoint
+		u.update_unit(dt, dir, aim)
+		_auto_attack(u, aim)
+	separate_units()
+	_update_home_heal(dt)
+	_update_carry_helpers()
+	_update_projectiles(dt)
+	_update_throws(dt)
+	_update_gates(dt)
+	_update_stations(dt)
+	_update_keys(dt)
+	_update_resources(dt)
+	_update_fx(dt)
+	_update_cakes(dt)
+	_update_respawns(dt)
+	_update_dropped_hats(dt)
+	_update_silhouettes(dt)
+	_update_interaction_label()
+	if state == S_TUTORIAL:
+		_update_tutorial(dt)
+	else:
+		_update_sudden_death()
+		_update_holds(dt)
+	_check_end()
+
+
+func _handle_player(dt: float) -> void:
+	if player == null or not is_instance_valid(player) or not player.alive:
+		return
+	var dir := Vector3.ZERO
+	var iv := Vector2(
+		Input.get_action_strength("move_right") - Input.get_action_strength("move_left"),
+		Input.get_action_strength("move_up") - Input.get_action_strength("move_down")
+	)
+	if autoplay:
+		iv = _autoplay_input(dt)
+	if iv.length() > 0.05:
+		var cam_fwd := -camera.global_transform.basis.z
+		cam_fwd.y = 0.0
+		cam_fwd = cam_fwd.normalized()
+		var cam_right := camera.global_transform.basis.x
+		cam_right.y = 0.0
+		cam_right = cam_right.normalized()
+		dir = (cam_right * iv.x + cam_fwd * iv.y).normalized()
+	var aim := _mouse_ground()
+	if autoplay:
+		aim = player.pos + Vector3(0, 0, 1)
+		if player.target_unit != null and is_instance_valid(player.target_unit):
+			aim = player.target_unit.pos
+	player.update_unit(dt, dir, aim)
+
+	if Input.is_action_just_pressed("jump") and not player.airborne:
+		player.start_jump()
+	if Input.is_action_just_pressed("attack") or Input.is_action_just_pressed("attack_mouse") or (autoplay and player.target_unit != null):
+		player.attack(aim)
+	if Input.is_action_just_pressed("dash") and player.dash_cd <= 0.0:
+		player.dash_t = 0.2
+		player.dash_cd = 1.5
+		add_shake(0.05)
+	if Input.is_action_just_pressed("act"):
+		_player_interact()
+	if Input.is_action_just_pressed("drop") and player.carrying != null:
+		drop_princess(player)
+	if Input.is_action_just_pressed("feed"):
+		_player_feed()
+	if autoplay:
+		_autoplay_actions()
+
+
+func _mouse_ground() -> Vector3:
+	var mp := get_viewport().get_mouse_position()
+	var o := camera.project_ray_origin(mp)
+	var n := camera.project_ray_normal(mp)
+	if absf(n.y) < 0.001:
+		return player.pos + Vector3(0, 0, 1)
+	var t: float = (1.0 - o.y) / n.y
+	var p := o + n * t
+	p.y = 0.0
+	return p
+
+
+func _player_interact() -> void:
+	if player.carrying != null:
+		drop_princess(player)
+		return
+	var pr := _nearest_princess(player.pos, 3.2, true)
+	if pr != null:
+		pick_up(pr, player)
+		return
+	var st := _nearest_hat(player.pos, 2.6)
+	if not st.is_empty():
+		if player.cls == st["cls"]:
+			ui.toast("already a " + st["cls"])
+		else:
+			player.set_class(st["cls"])
+			play_sfx(Core.tone(420.0, 0.22, "square", 0.22, 660.0), -11.0)
+			add_shake(0.04)
+			ui.flash_banner(Unit.NAMES[st["cls"]].to_upper() + " HAT", Color("e8b53f"), 1.0)
+			ui.toast("you are a %s now" % st["cls"])
+		return
+	ui.toast("nothing to pick up here")
+
+
+func _player_feed() -> void:
+	var pr := _nearest_princess(player.pos, 3.4, true)
+	if pr == null:
+		ui.toast("stand next to the captive princess")
+		return
+	if pr.team == player.team:
+		ui.toast("she is your own princess — feed the captive instead")
+		return
+	if player.cake <= 0:
+		ui.toast("no cake — find a cake pile")
+		return
+	if pr.carried_by != null:
+		ui.toast("put her down first")
+		return
+	if pr.weight >= pr.max_weight - 0.01:
+		ui.toast("she cannot eat another bite")
+		return
+	player.cake -= 1
+	throw_cake(player, pr)
+	ui.toast("cake away — catch!")
+	add_shake(0.02)
+
+
+func _nearest_princess(p: Vector3, rng: float, skip_carried: bool) -> Princess:
+	var best: Princess = null
+	var bd := rng
+	for pr in [red_princess, blue_princess]:
+		if pr == null or not is_instance_valid(pr):
+			continue
+		if skip_carried and pr.carried_by != null:
+			continue
+		var d := p.distance_to(pr.position)
+		if d < bd:
+			bd = d
+			best = pr
+	return best
+
+
+func _nearest_hat(p: Vector3, rng: float) -> Dictionary:
+	var best := {}
+	var bd := rng
+	for h in hats:
+		if h["team"] != 0:
+			continue
+		var d := p.distance_to(h["pos"])
+		if d < bd:
+			bd = d
+			best = h
+	return best
+
+
+func _update_cakes(dt: float) -> void:
+	for c in cakes:
+		if not c["active"]:
+			c["t"] -= dt
+			if c["t"] <= 0.0:
+				c["active"] = true
+				c["count"] = 2
+				c["node"].visible = true
+			continue
+		for u: Unit in units:
+			if not u.alive or u.cake >= 3:
+				continue
+			if u.pos.distance_to(c["pos"]) < 1.35:
+				u.pickup_cake(1)
+				c["count"] -= 1
+				if c["count"] <= 0:
+					c["active"] = false
+					c["t"] = 11.0
+					c["node"].visible = false
+				break
+
+
+func _update_respawns(dt: float) -> void:
+	for i in range(respawn_queue.size() - 1, -1, -1):
+		var r: Dictionary = respawn_queue[i]
+		r["t"] -= dt
+		if r["t"] <= 0.0:
+			var u: Unit = r["unit"]
+			if is_instance_valid(u):
+				u.respawn(_respawn_point(u.team))
+			respawn_queue.remove_at(i)
+
+
+## Hats left by the dead. Walk over one and it is yours — the fastest way for a
+## hatless worker to get back into a fight.
+func _update_dropped_hats(dt: float) -> void:
+	for i in range(dropped_hats.size() - 1, -1, -1):
+		var h: Dictionary = dropped_hats[i]
+		var node: Node3D = h["node"]
+		if is_instance_valid(node):
+			node.rotation.y += dt * 0.9
+		for u: Unit in units:
+			if not u.alive or u.cls == String(h["cls"]):
+				continue
+			if u.pos.distance_to(h["pos"]) > 1.6:
+				continue
+			if u.cls != "worker":
+				continue                       # you have to be hatless to scavenge
+			u.set_class(String(h["cls"]))
+			if u == player:
+				ui.toast("%s hat — press E on a stand to change again" % String(h["cls"]).to_upper())
+			play_sfx(Core.tone(680.0, 0.14, "tri", 0.25, 900.0), -10.0)
+			if is_instance_valid(node):
+				node.queue_free()
+			dropped_hats.remove_at(i)
+			break
+
+
+## Respawn on your own half, not always in the same doorway.
+func _respawn_point(team: int) -> Vector3:
+	var sx := -1.0 if team == 0 else 1.0
+	for i in 40:
+		var x: float = sx * randf_range(20.0, 74.0)
+		var z := randf_range(-48.0, 48.0)
+		if not Terrain.walkable(x, z):
+			continue
+		if Terrain.on_bridge(x, z):
+			continue
+		if Terrain.h(x, z) > Terrain.PLATEAU_H + 0.4:
+			continue                     # not on top of a wall
+		return Vector3(x, 0.0, z)
+	return castles[team]["spawn"]
+
+
+func _update_holds(dt: float) -> void:
+	if state != S_PLAY:
+		return
+	var rp := red_princess
+	var bp := blue_princess
+	var red_home := rp != null and rp.carried_by == null and rp.position.distance_to(castles[0]["throne"]) < 3.6
+	var blue_home := bp != null and bp.carried_by == null and bp.position.distance_to(castles[1]["throne"]) < 3.6
+	hold_red = clampf(hold_red + (dt if red_home else -dt * 3.0), 0.0, hold_target)
+	hold_blue = clampf(hold_blue + (dt if blue_home else -dt * 3.0), 0.0, hold_target)
+	if red_home:
+		hold_active = 0
+	elif blue_home:
+		hold_active = 1
+	else:
+		hold_active = -1
+	if red_home and fmod(hold_red, 4.0) < dt and hold_red > 1.0:
+		ui.flash_banner("%.0f" % ceilf(hold_target - hold_red), Color("e8b53f"), 0.8)
+	if blue_home and fmod(hold_blue, 4.0) < dt and hold_blue > 1.0:
+		ui.toast("blue is holding her princess — stop them!")
+
+
+## Both princesses fattened to a standstill is a real stalemate: the cake melts
+## and the hold shortens so a match always resolves.
+func _update_sudden_death() -> void:
+	if sudden or match_time < SUDDEN_AT:
+		return
+	sudden = true
+	hold_target = SUDDEN_HOLD
+	hold_red = minf(hold_red, hold_target)
+	hold_blue = minf(hold_blue, hold_target)
+	for pr in [red_princess, blue_princess]:
+		if pr != null and is_instance_valid(pr):
+			pr.fast_decay = true
+	# A siege can stall forever with two workers rebuilding two doors. Sudden
+	# death ends that: the gates come down, the cages pop open, and the fight
+	# has to be settled in the open.
+	for g in gates:
+		g["sealed"] = true
+		_damage_gate(int(g["team"]), 99999.0)
+	for pr2 in [red_princess, blue_princess]:
+		if pr2 != null and is_instance_valid(pr2) and pr2.locked:
+			pr2.locked = false
+	ui.flash_banner("SUDDEN DEATH — THE GATES FALL", Color("f2541b"), 3.0)
+	ui.toast("gates broken, cages open · hold the throne for 9 seconds")
+
+
+func _check_end() -> void:
+	if state != S_PLAY:
+		return
+	if hold_red >= hold_target:
+		_end_match(true)
+	elif hold_blue >= hold_target:
+		_end_match(false)
+
+
+func _end_match(win: bool) -> void:
+	state = S_OVER
+	var detail := ""
+	if win:
+		detail = "The Red Princess is home and the throne is yours.\nThe Blue Princess is still fat and forgotten in your dungeon."
+	else:
+		detail = "The Blue team walked your princess out of the dungeon and crowned her at their throne.\nFeed her more cake next time — weight is the only wall that matters."
+	if win:
+		play_sfx(Core.tone(523.0, 0.30, "tri", 0.32))
+		play_sfx(Core.tone(659.0, 0.32, "tri", 0.32))
+		play_sfx(Core.tone(784.0, 0.55, "tri", 0.32))
+	else:
+		play_sfx(Core.tone(392.0, 0.35, "tri", 0.30, 196.0))
+	ui.show_end(win, _clock(), detail)
+	ui.flash_banner("", Color.WHITE, 0.01)
+
+
+func _clock() -> String:
+	return "%02d:%02d" % [int(match_time) / 60, int(match_time) % 60]
+
+
+# ================================================================ combat
+func move_unit(p: Vector3, delta: Vector3, u: Unit) -> Vector3:
+	var rad := 0.40
+	var np := p + delta
+	np.x = clampf(np.x, -Terrain.HALF_X + 1.5, Terrain.HALF_X - 1.5)
+	np.z = clampf(np.z, -Terrain.HALF_Z + 1.5, Terrain.HALF_Z - 1.5)
+	var h0 := Terrain.h(p.x, p.z)
+	if u.airborne:
+		np.x = clampf(np.x, -Terrain.HALF_X + 1.5, Terrain.HALF_X - 1.5)
+		np.z = clampf(np.z, -Terrain.HALF_Z + 1.5, Terrain.HALF_Z - 1.5)
+		u.pos = np
+		return np
+	if not _can_step(np, h0, rad, u.team):
+		var try_x := Vector3(np.x, 0, p.z)
+		var try_z := Vector3(p.x, 0, np.z)
+		if _can_step(try_x, h0, rad, u.team):
+			np = try_x
+		elif _can_step(try_z, h0, rad, u.team):
+			np = try_z
+		else:
+			np = p
+	np.y = 0.0
+	return np
+
+
+## A step is legal if the ground is walkable, no wall taller than the unit's feet
+## is in the way, and the height change is one a body can make.
+func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
+	if not Terrain.walkable(p.x, p.z):
+		return false
+	var h1 := Terrain.h(p.x, p.z)
+	if h1 - from_h > Terrain.STEP_UP:
+		return false                                # too high to climb
+	if from_h - h1 > Terrain.STEP_DOWN:
+		return false                                # do not walk off the parapet
+	for s in solids:
+		var rr: Rect2 = s["r"]
+		if float(s["top"]) < from_h + 0.25:
+			continue                                # we are standing on top of this
+		var tag: String = String(s.get("tag", ""))
+		if tag != "" and team >= 0 and tag == "gate%d" % team:
+			continue                                # your own gate opens for you
+		if rr.grow(rad).has_point(Vector2(p.x, p.z)):
+			return false
+	return true
+
+
+func _blocked(p: Vector3, rad: float, team: int = -1) -> bool:
+	return not _can_step(p, Terrain.h(p.x, p.z), rad, team)
+
+
+func _update_home_heal(dt: float) -> void:
+	for u: Unit in units:
+		if not u.alive or u.hp >= u.max_hp:
+			continue
+		if u.pos.distance_to(castles[u.team]["spawn"]) < 3.4 or u.pos.distance_to(castles[u.team]["throne"]) < 3.0:
+			u.hp = minf(u.max_hp, u.hp + 20.0 * dt)
+
+
+func separate_units() -> void:
+	for i in units.size():
+		var a: Unit = units[i]
+		if not a.alive:
+			continue
+		for j in range(i + 1, units.size()):
+			var b: Unit = units[j]
+			if not b.alive:
+				continue
+			var d := b.pos - a.pos
+			d.y = 0.0
+			var dist := d.length()
+			if dist > 0.001 and dist < 0.9:
+				var push := d / dist * (0.9 - dist) * 0.5
+				a.pos -= push
+				b.pos += push
+
+
+func _update_carry_helpers() -> void:
+	for u: Unit in units:
+		if not u.alive or u.carrying == null:
+			continue
+		var n := 0
+		for o: Unit in units:
+			if o == u or not o.alive or o.team != u.team:
+				continue
+			if o.pos.distance_to(u.pos) < 4.0:
+				n += 1
+		u.carrying.helpers = mini(n, 3)
+
+
+func melee_hit(u: Unit, rng: float, dmg: float, force_drop: bool) -> void:
+	play_sfx(Core.tone(190.0, 0.09, "noise", 0.22), -14.0)
+	# a closed gate is a target: hold the line or break through
+	if _gate_reach(u):
+		_damage_gate(1 - u.team, dmg * 0.55)
+	var fwd := Vector3(sin(u.yaw), 0, cos(u.yaw))
+	for o: Unit in units:
+		if o == u or not o.alive or o.team == u.team:
+			continue
+		var d := o.pos - u.pos
+		d.y = 0.0
+		if d.length() > rng:
+			continue
+		if fwd.dot(d.normalized()) < -0.35:
+			continue
+		o.take_damage(dmg, u.pos, force_drop)
+	# dummies take hits too
+	for dm in dummies:
+		var dd: Vector3 = dm["pos"] - u.pos
+		dd.y = 0.0
+		if dd.length() < rng + 0.4:
+			dm["hp"] -= dmg
+			_spawn_hit_fx(dm["pos"] + Vector3(0, 1.2, 0), dmg, 1, u.pos - dm["pos"])
+			if dm["hp"] <= 0.0:
+				dm["node"].visible = false
+				dm["t"] = 5.0
+
+
+func spawn_projectile(owner: Unit, from: Vector3, target: Vector3, kind: String) -> void:
+	var dir := target - from
+	dir.y = 0.0
+	if dir.length() < 0.1:
+		dir = Vector3(sin(owner.yaw), 0, cos(owner.yaw))
+	dir = dir.normalized()
+	var node := Node3D.new()
+	world.add_child(node)
+	if kind == "arrow":
+		Bld.arrow_model(node)
+	else:
+		Bld.fireball_model(node)
+	var y_off := 1.25 if kind == "arrow" else 1.35
+	from.y = Terrain.h(from.x, from.z) + y_off
+	node.position = from
+	node.rotation.y = atan2(dir.x, dir.z)
+	projectiles.append({
+		"node": node, "pos": from, "prev": from, "dir": dir, "kind": kind,
+		"team": owner.team, "owner": owner, "life": 2.4,
+		"speed": 34.0 if kind == "arrow" else 17.0,
+		"dmg": (24.0 if kind == "arrow" else 32.0) * owner.damage_scale(),
+		"trail": 0.0, "y_off": y_off, "y": from.y,
+	})
+	play_sfx(Core.tone(880.0, 0.07, "tri", 0.16, 1400.0) if kind == "arrow"
+		else Core.tone(180.0, 0.22, "noise", 0.18, 90.0), -18.0)
+
+
+## Swept hit test: a fast projectile moves most of a unit per frame, so the
+## segment it travelled is checked, not just the point it stopped at.
+func _projectile_hit_test(p: Dictionary, target_pos: Vector3, radius: float) -> bool:
+	var a := Vector2(p["prev"].x, p["prev"].z)
+	var b := Vector2(p["pos"].x, p["pos"].z)
+	var t := Vector2(target_pos.x, target_pos.z)
+	var closest := Geometry2D.get_closest_point_to_segment(t, a, b)
+	return closest.distance_to(t) <= radius
+
+
+func _update_projectiles(dt: float) -> void:
+	for i in range(projectiles.size() - 1, -1, -1):
+		var p: Dictionary = projectiles[i]
+		p["life"] -= dt
+		var dir: Vector3 = p["dir"]
+		p["prev"] = p["pos"]
+		p["pos"] = p["pos"] + dir * p["speed"] * dt
+		var node: Node3D = p["node"]
+		if not is_instance_valid(node):
+			projectiles.remove_at(i)
+			continue
+		# ease the height: an arrow leaving the parapet should fall to the field,
+		# not teleport down the instant it clears the wall
+		var want_y: float = Terrain.h(p["pos"].x, p["pos"].z) + p["y_off"]
+		p["y"] = lerpf(p["y"], want_y, 1.0 - exp(-7.0 * dt))
+		p["pos"].y = p["y"]
+		node.position = p["pos"]
+		node.rotation.y = atan2(dir.x, dir.z)
+
+		# trail: an arrow at play zoom is a couple of pixels without it
+		p["trail"] -= dt
+		if p["trail"] <= 0.0:
+			p["trail"] = 0.03 if p["kind"] == "arrow" else 0.055
+			_spawn_projectile_trail(p["pos"], p["kind"])
+
+		var dead: bool = p["life"] <= 0.0
+		for o: Unit in units:
+			if not o.alive or o.team == p["team"]:
+				continue
+			if _projectile_hit_test(p, o.pos, 0.72):
+				o.take_damage(p["dmg"], p["pos"] - dir, false)
+				if p["kind"] == "fire":
+					_splash(p["pos"], p["team"], 2.6, 16.0)
+					play_sfx(Core.tone(120.0, 0.30, "noise", 0.28, 60.0), -12.0)
+				dead = true
+				break
+		if not dead:
+			for dm in dummies:
+				if not dm["node"].visible:
+					continue
+				if _projectile_hit_test(p, dm["pos"] + Vector3(0, 1.0, 0), 0.85):
+					dm["hp"] -= p["dmg"]
+					_spawn_hit_fx(dm["pos"] + Vector3(0, 1.3, 0), p["dmg"], p["team"], dir)
+					if dm["hp"] <= 0.0:
+						dm["node"].visible = false
+						dm["t"] = 5.0
+					dead = true
+					break
+		if dead:
+			_spawn_hit_fx(p["pos"], 0.0, p["team"], dir)
+			node.queue_free()
+			projectiles.remove_at(i)
+
+
+func _spawn_projectile_trail(at: Vector3, kind: String) -> void:
+	var n := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	var fire := kind == "fire"
+	sm.radius = 0.13 if fire else 0.075
+	sm.height = (0.20 if fire else 0.10)
+	sm.radial_segments = 6
+	sm.rings = 3
+	n.mesh = sm
+	n.material_override = Core.mat(Color("ff8a2d") if fire else Color("ffe9b0"), 0.5, 0.0, 2.0)
+	n.position = at
+	world.add_child(n)
+	fx.append({"node": n, "vel": Vector3(0, 0.5 if fire else 0.0, 0), "life": 0.26 if fire else 0.16,
+		"spin": 0.0, "fade": true})
+
+
+func _splash(at: Vector3, team: int, rng: float, dmg: float) -> void:
+	for o: Unit in units:
+		if not o.alive or o.team == team:
+			continue
+		if o.pos.distance_to(at) < rng:
+			o.take_damage(dmg, at, false)
+
+
+func spawn_hit_fx(at: Vector3, amount: float, team: int, dir: Vector3) -> void:
+	_spawn_hit_fx(at, amount, team, dir)
+
+
+func _spawn_hit_fx(at: Vector3, amount: float, team: int, dir: Vector3) -> void:
+	if amount > 1.0:
+		play_sfx(Core.tone(150.0, 0.10, "square", 0.20), -15.0)
+	var col := Core.RED_LIGHT if team == 0 else Core.BLUE_LIGHT
+	for i in 5:
+		var n := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		var s := randf_range(0.08, 0.18)
+		bm.size = Vector3(s, s, s)
+		n.mesh = bm
+		n.material_override = Core.mat(Color("c22a2a") if randf() < 0.6 else col, 0.7)
+		n.position = at
+		world.add_child(n)
+		var v := Vector3(randf_range(-3, 3), randf_range(2.5, 5.5), randf_range(-3, 3))
+		v += dir.normalized() * 1.5
+		fx.append({"node": n, "vel": v, "life": randf_range(0.35, 0.6), "spin": randf_range(-8, 8)})
+	if amount > 1.0:
+		var l := Core.label3d(world, str(int(amount)), at + Vector3(0, 0.5, 0), 60,
+			Color("ffd766") if team == 0 else Color("a8c4ff"))
+		l.no_depth_test = true
+		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		fx.append({"node": l, "vel": Vector3(randf_range(-0.6, 0.6), 2.4, 0), "life": 0.85, "spin": 0.0, "fade": true})
+
+
+func _spawn_feed_fx(at: Vector3) -> void:
+	for i in 9:
+		var n := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.12, 0.12, 0.12)
+		n.mesh = bm
+		n.material_override = Core.mat(Core.FROST if i % 2 == 0 else Core.CAKE, 0.6)
+		n.position = at + Vector3(randf_range(-0.5, 0.5), 1.2, randf_range(-0.5, 0.5))
+		world.add_child(n)
+		fx.append({"node": n, "vel": Vector3(randf_range(-2, 2), randf_range(3, 5.5), randf_range(-2, 2)),
+			"life": 0.7, "spin": randf_range(-6, 6)})
+
+
+func _update_fx(dt: float) -> void:
+	for i in range(fx.size() - 1, -1, -1):
+		var f: Dictionary = fx[i]
+		f["life"] -= dt
+		var n = f["node"]
+		if not is_instance_valid(n):
+			fx.remove_at(i)
+			continue
+		f["vel"] = f["vel"] + Vector3(0, -14.0 * dt, 0)
+		n.position = n.position + f["vel"] * dt
+		if n is Node3D and not (n is Label3D):
+			n.rotation.y += f["spin"] * dt
+		if f.get("fade", false):
+			if n is Label3D:
+				n.modulate.a = clampf(f["life"] / 0.85, 0.0, 1.0)
+			elif n is Node3D:
+				n.scale = Vector3.ONE * clampf(f["life"] * 2.2, 0.05, 1.0)
+		if f["life"] <= 0.0:
+			n.queue_free()
+			fx.remove_at(i)
+	for dm in dummies:
+		if not dm["node"].visible:
+			dm["t"] -= dt
+			if dm["t"] <= 0.0:
+				dm["node"].visible = true
+				dm["hp"] = 60.0
+
+
+func add_shake(a: float) -> void:
+	shake = minf(shake + a, 0.35)
+
+
+# ================================================================ cake throwing
+## A slice leaves the thrower's hand, arcs across, and only counts when it lands
+## on her — the weight step, the chew and the growth all key off the impact.
+func throw_cake(feeder: Unit, pr: Princess) -> void:
+	if pr == null or not is_instance_valid(pr):
+		return
+	var from := feeder.pos + Vector3(0, 1.30, 0) + Vector3(sin(feeder.yaw), 0, cos(feeder.yaw)) * 0.35
+	var node := Node3D.new()
+	world.add_child(node)
+	Core.box(node, Vector3(0.55, 0.42, 0.40), Vector3.ZERO, Core.CAKE, Vector3.ZERO, 0.6)
+	Core.box(node, Vector3(0.58, 0.12, 0.43), Vector3(0, 0.25, 0), Core.FROST, Vector3.ZERO, 0.45)
+	Core.sphere(node, 0.11, Vector3(0, 0.37, 0), Core.CHERRY, 1.0, 8, 0.4)
+	# faint glow so a slice in flight is unmissable
+	var halo := Core.sphere(node, 0.42, Vector3.ZERO, Core.FROST, 1.0, 8, 0.3)
+	var hm := Core.mat(Core.FROST, 0.5, 0.0, 0.6)
+	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hm.albedo_color.a = 0.18
+	halo.material_override = hm
+	node.position = from
+	node.scale = Vector3(0.8, 0.8, 0.8)
+	feeder.swing = 0.9
+	feeder.attack_cd = maxf(feeder.attack_cd, 0.3)
+	throws.append({
+		"node": node, "from": from, "t": 0.0, "dur": 0.55,
+		"pr": pr, "feeder": feeder, "spin": randf_range(-8.0, 8.0), "trail": 0.0,
+	})
+	play_sfx(Core.tone(300.0, 0.14, "tri", 0.22, 520.0), -15.0)
+
+
+func _update_throws(dt: float) -> void:
+	for i in range(throws.size() - 1, -1, -1):
+		var th: Dictionary = throws[i]
+		var node: Node3D = th["node"]
+		var pr: Princess = th["pr"]
+		if not is_instance_valid(node):
+			throws.remove_at(i)
+			continue
+		if pr == null or not is_instance_valid(pr):
+			node.queue_free()
+			throws.remove_at(i)
+			continue
+		th["t"] += dt
+		var k: float = clampf(th["t"] / th["dur"], 0.0, 1.0)
+		var to: Vector3 = pr.position + Vector3(0, 1.55, 0)
+		var p: Vector3 = th["from"].lerp(to, k)
+		p.y += sin(k * PI) * 0.7
+		node.position = p
+		node.rotation.x += dt * th["spin"]
+		node.rotation.y += dt * 5.0
+		node.scale = Vector3.ONE * lerpf(0.8, 1.0, k)
+		# trail puffs: a 0.55-unit slice is a few pixels at play zoom, the trail is not
+		th["trail"] -= dt
+		if th["trail"] <= 0.0:
+			th["trail"] = 0.05
+			var puff := MeshInstance3D.new()
+			var pm := SphereMesh.new()
+			pm.radius = 0.11
+			pm.height = 0.16
+			puff.mesh = pm
+			puff.material_override = Core.mat(Core.FROST, 0.5, 0.0, 0.9)
+			puff.position = p
+			world.add_child(puff)
+			fx.append({"node": puff, "vel": Vector3.ZERO, "life": 0.28, "spin": 0.0, "fade": true})
+		if k >= 1.0:
+			_land_cake(pr, th["feeder"])
+			node.queue_free()
+			throws.remove_at(i)
+
+
+func _land_cake(pr: Princess, feeder: Unit) -> void:
+	var before := pr.weight
+	pr.eat(1.0)
+	_spawn_feed_fx(pr.position + Vector3(0, 1.1, 0))
+	play_sfx(Core.tone(520.0, 0.18, "tri", 0.30, 820.0), -10.0)
+	play_sfx(Core.tone(180.0, 0.10, "noise", 0.18), -18.0)
+	add_shake(0.04)
+	if feeder == player:
+		ui.toast("fed her: weight %d / %d" % [int(pr.weight), int(pr.max_weight)])
+	# "+1 WEIGHT" pops off her head so the growth step is unmistakable
+	var l := Core.label3d(world, "+1", pr.position + Vector3(0.75, 1.9 + 0.09 * pr.weight, 0.2), 64, Core.GOLD)
+	l.no_depth_test = true
+	l.outline_size = 12
+	fx.append({"node": l, "vel": Vector3(0, 2.2, 0), "life": 0.9, "spin": 0.0, "fade": true})
+	if int(pr.weight) >= 6 and before < 6.0:
+		ui.flash_banner("SHE IS GETTING HEAVY", Color("f6b8cf"), 1.6)
+
+
+# ================================================================ team synergy
+## Nothing here is required to play: every one of these is a multiplier a team
+## earns by using its classes properly, and a solo player just goes without.
+func class_upgraded(team: int, cls: String) -> bool:
+	if team < 0 or team >= castles.size():
+		return false
+	var upg: Dictionary = castles[team].get("upg", {})
+	return bool(upg.get(cls, false))
+
+
+## True when the unit is standing on a wall walk or a bridge deck, i.e. above
+## the battlefield — archers and mages shoot down with a damage bonus.
+func on_wall(p: Vector3) -> bool:
+	return Terrain.h(p.x, p.z) > Bld.WALK_H - 0.5
+
+
+## Shield wall: a warrior standing among allies soaks part of the damage.
+func incoming_scale(u: Unit) -> float:
+	var s := 1.0
+	for o: Unit in units:
+		if o == u or not o.alive or o.team != u.team or o.cls != "warrior":
+			continue
+		if o.pos.distance_to(u.pos) < 5.0:
+			s *= 0.82
+			break
+	if u.cls == "worker":
+		s *= 1.12                        # no shield, no armour, no luck
+	return s
+
+
+## Workers deliver 3 wood + 3 ore to a station to upgrade that class for the
+## whole team.
+func _update_stations(dt: float) -> void:
+	for u: Unit in units:
+		if not u.alive or u.cls != "worker" or u.wood < 3 or u.metal < 3:
+			continue
+		var upg: Dictionary = castles[u.team].get("upg", {})
+		for h in hats:
+			if int(h["team"]) != u.team or bool(upg.get(String(h["cls"]), false)):
+				continue
+			if u.pos.distance_to(h["pos"]) > 2.6:
+				continue
+			u.wood -= 3
+			u.metal -= 3
+			upg[String(h["cls"])] = true
+			castles[u.team]["upg"] = upg
+			_mark_station(h)
+			play_sfx(Core.tone(520.0, 0.25, "tri", 0.3, 880.0), -8.0)
+			ui.toast("%s station upgraded — the whole team hits harder" % Unit.NAMES[h["cls"]].to_upper())
+			return
+
+
+func _mark_station(h: Dictionary) -> void:
+	var node: Node3D = h.get("node", null)
+	if node == null or not is_instance_valid(node):
+		return
+	var star := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.26
+	sm.height = 0.5
+	star.mesh = sm
+	star.material_override = Core.mat(Core.GOLD, 0.4, 0.2, 1.4)
+	star.position = Vector3(0, 2.35, 0)
+	node.add_child(star)
+	fx.append({"node": star, "vel": Vector3(0, 0.6, 0), "life": 1.0, "spin": 2.0, "fade": true})
+
+
+# ================================================================ siege
+## The gate is a door with hit points. Anyone on the other side can break it;
+## a worker with materials can put it back up.
+func _damage_gate(team: int, dmg: float) -> void:
+	var g: Dictionary = gates[team]
+	if not g["alive"]:
+		return
+	g["hp"] = maxf(0.0, float(g["hp"]) - dmg)
+	g["last_hit"] = Time.get_ticks_msec() / 1000.0
+	if g["hp"] <= 0.0:
+		g["alive"] = false
+		_break_gate_solid(g)
+		var node: Node3D = g["node"]
+		if is_instance_valid(node):
+			node.visible = false
+		play_sfx(Core.tone(90.0, 0.7, "noise", 0.35, 45.0), -6.0)
+		add_shake(0.18)
+		ui.flash_banner("%s GATE IS DOWN" % ("RED" if team == 0 else "BLUE"), Color("f2a03d"), 2.0)
+
+
+func _break_gate_solid(g: Dictionary) -> void:
+	var tag: String = g["solid"]
+	for i in range(solids.size() - 1, -1, -1):
+		if String(solids[i].get("tag", "")) == tag:
+			solids.remove_at(i)
+
+
+func _restore_gate_solid(g: Dictionary) -> void:
+	var tag: String = g["solid"]
+	for i in solids.size():
+		if String(solids[i].get("tag", "")) == tag:
+			return
+	solids.append({"r": g["rect"], "top": Terrain.PLATEAU_H + 4.3, "tag": tag})
+
+
+func _update_gates(dt: float) -> void:
+	# door swing animation on the cage, per castle
+	for t in 2:
+		var c: Dictionary = castles[t]
+		var door = c.get("cage_door", null)
+		if door == null or not is_instance_valid(door):
+			continue
+		var want: float = 0.0
+		var pr: Princess = red_princess if t == 1 else blue_princess
+		if pr != null and not pr.locked:
+			want = 1.0
+		c["door_t"] = move_toward(float(c.get("door_t", 0.0)), want, dt * 2.2)
+		door.rotation_degrees.y = lerpf(0.0, 105.0 * (1.0 if t == 0 else -1.0), c["door_t"])
+
+	for g in gates:
+		var team: int = g["team"]
+		if not g["alive"]:
+			# workers can rebuild, but only back to a solid door above 40%
+			if float(g["hp"]) >= float(g["max"]) * 0.4:
+				g["alive"] = true
+				_restore_gate_solid(g)
+				var node: Node3D = g["node"]
+				if is_instance_valid(node):
+					node.visible = true
+		var node2: Node3D = g["node"]
+		if is_instance_valid(node2) and g["alive"]:
+			# a damaged gate visibly sags and darkens
+			var f: float = clampf(float(g["hp"]) / float(g["max"]), 0.0, 1.0)
+			node2.rotation_degrees.x = (1.0 - f) * 7.0
+			node2.scale = Vector3(1.0, lerpf(0.86, 1.0, f), 1.0)
+
+	# workers repair their own gate with what they carry
+	for u: Unit in units:
+		if not u.alive or u.cls != "worker":
+			continue
+		var g2: Dictionary = gates[u.team]
+		if bool(g2.get("sealed", false)):
+			continue
+		if u.pos.distance_to(g2["pos"]) > 3.4:
+			continue
+		if float(g2["hp"]) >= float(g2["max"]) or (u.wood + u.metal) <= 0:
+			continue
+		# you cannot nail planks onto a door somebody is breaking down
+		if Time.get_ticks_msec() / 1000.0 - float(g2.get("last_hit", -99.0)) < 2.5:
+			continue
+		u.attack_cd = maxf(u.attack_cd, 0.4)
+		u.repair_t -= dt
+		if u.repair_t <= 0.0:
+			u.repair_t = 0.6
+			if u.wood > 0:
+				u.wood -= 1
+			else:
+				u.metal -= 1
+			g2["hp"] = minf(float(g2["max"]), float(g2["hp"]) + 110.0)
+			_spawn_hammer_fx(g2["pos"] + Vector3(0, 1.2, 0))
+			if u == player:
+				ui.toast("repairing the gate — %d%%" % int(100.0 * float(g2["hp"]) / float(g2["max"])))
+
+
+func _spawn_hammer_fx(at: Vector3) -> void:
+	var n := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.16, 0.16, 0.16)
+	n.mesh = bm
+	n.material_override = Core.mat(Color("ffd166"), 0.5, 0.0, 1.6)
+	n.position = at + Vector3(randf_range(-0.6, 0.6), 0, randf_range(-0.6, 0.6))
+	world.add_child(n)
+	fx.append({"node": n, "vel": Vector3(0, 1.6, 0), "life": 0.3, "spin": 6.0, "fade": true})
+	play_sfx(Core.tone(420.0, 0.07, "square", 0.12), -18.0)
+
+
+func _gate_reach(u: Unit) -> bool:
+	var g: Dictionary = gates[1 - u.team]
+	if not g["alive"]:
+		return false
+	return u.pos.distance_to(g["pos"]) < 3.4
+
+
+# ================================================================ keys and cages
+func _update_keys(dt: float) -> void:
+	# keys float and turn so they read from a distance
+	for k in keys:
+		var node: Node3D = k["node"]
+		if is_instance_valid(node) and k["taken"] == -1:
+			node.rotation.y += dt * 1.6
+			node.position.y = Terrain.h(k["pos"].x, k["pos"].z) - Terrain.PLATEAU_H + 1.42 				+ sin(Time.get_ticks_msec() * 0.004) * 0.08
+	# auto pickup: walk into the key
+	for u: Unit in units:
+		if not u.alive or u.has_key:
+			continue
+		for k in keys:
+			if k["taken"] != -1:
+				continue
+			if u.pos.distance_to(k["pos"]) < 1.7:
+				k["taken"] = u.get_instance_id()
+				u.has_key = true
+				u.key_team = int(k["team"])
+				var node2: Node3D = k["node"]
+				if is_instance_valid(node2):
+					node2.visible = false
+				if u == player:
+					ui.toast("picked up the %s key — take it to their cage" % ("red" if k["team"] == 0 else "blue"))
+				play_sfx(Core.tone(760.0, 0.16, "tri", 0.28, 1140.0), -10.0)
+	# a keyed unit opens the cage it belongs to
+	for pr in [red_princess, blue_princess]:
+		if pr == null or not is_instance_valid(pr) or not pr.locked:
+			continue
+		var cage_team: int = 1 - pr.team
+		for u: Unit in units:
+			if not u.alive or not u.has_key or u.key_team != cage_team:
+				continue
+			# only the raiders open a cage: freeing your own prisoner is never wanted
+			if u.team == cage_team:
+				continue
+			if u.pos.distance_to(Vector3(pr.position.x, 0.0, pr.position.z)) < 2.9:
+				pr.locked = false
+				play_sfx(Core.tone(320.0, 0.3, "square", 0.25, 520.0), -8.0)
+				if u == player:
+					ui.toast("the cage door swings open")
+				else:
+					ui.toast("the enemy is opening their cage!")
+				u.has_key = false
+				u.key_team = -1
+				# return the key to its hook after a moment
+				for k in keys:
+					if int(k["team"]) == cage_team:
+						k["taken"] = -1
+						var nd: Node3D = k["node"]
+						if is_instance_valid(nd):
+							nd.visible = true
+				break
+
+
+func _nearest_resource(p: Vector3) -> Dictionary:
+	var best := {}
+	var bd := 1e9
+	for r in resources:
+		if not r["active"]:
+			continue
+		var d := p.distance_to(r["pos"])
+		if d < bd:
+			bd = d
+			best = r
+	return best
+
+
+func _update_resources(dt: float) -> void:
+	for r in resources:
+		if not r["active"]:
+			r["t"] -= dt
+			if r["t"] <= 0.0:
+				r["active"] = true
+				r["count"] = 3
+				var nd: Node3D = r["node"]
+				if is_instance_valid(nd):
+					nd.visible = true
+			continue
+		for u: Unit in units:
+			if not u.alive or u.cls != "worker":
+				continue
+			if u.pos.distance_to(r["pos"]) > 1.9:
+				continue
+			var kind: String = r["kind"]
+			if kind == "wood" and u.wood >= 4:
+				continue
+			if kind == "metal" and u.metal >= 4:
+				continue
+			u.gather_t -= dt
+			if u.gather_t > 0.0:
+				continue
+			u.gather_t = 0.55
+			if kind == "wood":
+				u.wood += 1
+			else:
+				u.metal += 1
+			r["count"] -= 1
+			_spawn_hammer_fx(Vector3(r["pos"].x, Terrain.h(r["pos"].x, r["pos"].z) + 0.7, r["pos"].z))
+			if r["count"] <= 0:
+				r["active"] = false
+				r["t"] = 20.0
+				var n2: Node3D = r["node"]
+				if is_instance_valid(n2):
+					n2.visible = false
+			break
+
+
+# ================================================================ carrying
+func pick_up(pr: Princess, u: Unit) -> void:
+	if pr.carried_by == u:
+		return
+	if pr.locked:
+		if u == player:
+			ui.toast("the cage is locked — the key hangs in this castle")
+		return
+	# exactly one carrier and one cargo, always: clear the other side first
+	if u.carrying != null and u.carrying != pr:
+		drop_princess(u)
+	if pr.carried_by != null:
+		drop_princess(pr.carried_by)
+	pr.detach(Vector3.ZERO)
+	pr.attach(u)
+	u.carrying = pr
+	play_sfx(Core.tone(680.0, 0.15, "tri", 0.28, 1000.0), -11.0)
+	ui.toast("carrying — she is %s (weight %d)" % [pr.carry_speed_note().to_lower(), int(pr.weight)])
+	add_shake(0.03)
+
+
+func drop_princess(u: Unit) -> void:
+	if u.carrying == null:
+		return
+	var pr := u.carrying
+	u.carrying = null
+	var at := u.pos + Vector3(sin(u.yaw), 0, cos(u.yaw)) * 1.3
+	at.y = 0.0
+	pr.detach(at)
+	pr.tag.text = "DROPPED"
+
+
+func drop_cake(at: Vector3, count: int, _team: int) -> void:
+	if count <= 0 or cakes.size() > 26:
+		return
+	_add_cake_pile(Vector3(at.x, 0.0, at.z), count)
+
+
+func _drop_key(u: Unit) -> void:
+	if not u.has_key:
+		return
+	u.has_key = false
+	for k in keys:
+		if int(k["team"]) != u.key_team:
+			continue
+		k["taken"] = -1
+		k["pos"] = Vector3(u.pos.x, 0.0, u.pos.z)
+		var nd: Node3D = k["node"]
+		if is_instance_valid(nd):
+			nd.visible = true
+			nd.position = Vector3(u.pos.x, Terrain.h(u.pos.x, u.pos.z) + 1.1, u.pos.z)
+		break
+	u.key_team = -1
+
+
+func _drop_hat(u: Unit) -> void:
+	if u.cls == "worker" or dropped_hats.size() >= 14:
+		return
+	var p := Vector3(u.pos.x, Terrain.h(u.pos.x, u.pos.z), u.pos.z)
+	var n := Bld.dropped_hat(world, u.cls, p)
+	dropped_hats.append({"cls": u.cls, "pos": Vector3(u.pos.x, 0.0, u.pos.z), "node": n, "t": 0.0})
+
+
+func on_unit_died(u: Unit) -> void:
+	var delay := PLAYER_RESPAWN if u == player else (ALLY_RESPAWN if u.team == 0 else MATCH_RESPAWN)
+	respawn_queue.append({"unit": u, "t": delay})
+	if u == player:
+		ui.flash_banner("DOWN — BACK IN %ds" % int(delay), Color("e2544a"), delay)
+
+
+# ================================================================ AI
+func _update_ai(dt: float) -> void:
+	for u: Unit in units:
+		if not u.alive or u == player:
+			continue
+		u.role_t -= dt
+		if u.role_t <= 0.0:
+			u.role_t = 0.45 + randf() * 0.2
+			_think(u)
+
+
+func _think(u: Unit) -> void:
+	u.target_unit = null
+	u.has_waypoint = false
+	var enemy_team := 1 - u.team
+	var enemy := _nearest_enemy(u, 999.0)
+	var own_princess: Princess = red_princess if u.team == 0 else blue_princess
+	var enemy_princess: Princess = blue_princess if u.team == 0 else red_princess
+
+	# Carrying: keep walking to the goal.
+	if u.carrying != null:
+		var pr := u.carrying
+		if pr.team == u.team:
+			u.waypoint = castles[u.team]["throne"]
+		else:
+			u.waypoint = castles[u.team]["dungeon"]
+		u.has_waypoint = true
+		# drop her off if we are already inside the right zone
+		var zone: Vector3 = u.waypoint
+		if u.pos.distance_to(zone) < 2.6:
+			drop_princess(u)
+		return
+
+	# The enemy princess is sitting on their throne, being held: kidnap her back.
+	# This is the only defence that matters once a hold starts.
+	if enemy_princess != null and enemy_princess.carried_by == null 			and enemy_princess.position.distance_to(castles[enemy_team]["throne"]) < 3.6:
+		if u.pos.distance_to(enemy_princess.position) < 2.4:
+			pick_up(enemy_princess, u)
+			return
+		u.waypoint = enemy_princess.position
+		u.has_waypoint = true
+		if enemy != null and u.pos.distance_to(enemy.pos) < 3.5:
+			u.target_unit = enemy
+		return
+
+	# A closed gate blocks the way in: everybody who wants inside hits it.
+	var eg: Dictionary = gates[1 - u.team]
+	if not eg.is_empty() and eg["alive"] and _gate_reach(u):
+		u.waypoint = eg["pos"]
+		u.has_waypoint = true
+		if u.brain != "worker":
+			return
+
+	# Someone is stealing a princess we care about: fight them.
+	for pr in [own_princess, enemy_princess]:
+		if pr != null and pr.carried_by != null and pr.carried_by.team != u.team:
+			u.target_unit = pr.carried_by
+			return
+
+	if u.brain == "feeder" and enemy_princess != null and enemy_princess.carried_by == null:
+		if u.cake <= 0:
+			var pile := _nearest_cake(u.pos)
+			if pile.size() > 0:
+				u.waypoint = pile["pos"]
+				u.has_waypoint = true
+				return
+		if enemy_princess.weight >= 6.0:
+			u.waypoint = _gate_out(u.team)
+			u.has_waypoint = true
+			return
+		if u.pos.distance_to(enemy_princess.position) < 3.0:
+			if u.attack_cd <= 0.0:
+				u.attack_cd = 1.3
+				u.cake -= 1
+				throw_cake(u, enemy_princess)
+			return
+		u.waypoint = enemy_princess.position
+		u.has_waypoint = true
+		return
+
+	if u.brain == "rescuer" and own_princess != null and own_princess.locked:
+		var cage_team: int = 1 - u.team
+		if u.has_key and u.key_team == cage_team:
+			u.waypoint = Vector3(own_princess.position.x, 0.0, own_princess.position.z)
+			u.has_waypoint = true
+			return
+		var kk: Dictionary = keys[cage_team]
+		if kk["taken"] == -1:
+			u.waypoint = kk["pos"]
+			u.has_waypoint = true
+			return
+
+	if u.brain == "rescuer" and own_princess != null and own_princess.carried_by == null:
+		# already at her own throne: stand guard, never pick her up again
+		if own_princess.position.distance_to(castles[u.team]["throne"]) < 3.6:
+			u.waypoint = own_princess.position
+			u.has_waypoint = true
+			if enemy != null and u.pos.distance_to(enemy.pos) < 9.0:
+				u.target_unit = enemy
+			return
+		if u.pos.distance_to(own_princess.position) < 2.4:
+			pick_up(own_princess, u)
+			return
+		u.waypoint = own_princess.position
+		u.has_waypoint = true
+		return
+
+	if u.brain == "worker":
+		var g: Dictionary = gates[u.team]
+		if float(g["hp"]) < float(g["max"]) * 0.8:
+			if u.wood + u.metal <= 0:
+				var res := _nearest_resource(u.pos)
+				if not res.is_empty():
+					u.waypoint = res["pos"]
+					u.has_waypoint = true
+					return
+			u.waypoint = g["pos"]
+			u.has_waypoint = true
+			return
+		if u.wood + u.metal < 6:
+			var res2 := _nearest_resource(u.pos)
+			if not res2.is_empty():
+				u.waypoint = res2["pos"]
+				u.has_waypoint = true
+				return
+		u.waypoint = g["pos"]
+		u.has_waypoint = true
+		return
+
+	if u.brain == "ally" and player != null and is_instance_valid(player) and player.alive and player.carrying != null:
+		u.waypoint = player.pos
+		u.has_waypoint = true
+		if enemy != null and u.pos.distance_to(enemy.pos) < 5.0:
+			u.target_unit = enemy
+		return
+
+	var engage: float = 16.0 if u.brain == "attacker" else 5.0
+	if enemy != null and u.pos.distance_to(enemy.pos) < engage:
+		u.target_unit = enemy
+		return
+
+	# default: push toward the enemy castle
+	u.waypoint = _gate_in(enemy_team)
+	u.has_waypoint = true
+	if enemy != null:
+		u.target_unit = enemy
+
+
+func _nearest_enemy(u: Unit, rng: float) -> Unit:
+	var best: Unit = null
+	var bd := rng
+	for o: Unit in units:
+		if o == u or not o.alive or o.team == u.team:
+			continue
+		var d := o.pos.distance_to(u.pos)
+		if d < bd:
+			bd = d
+			best = o
+	return best
+
+
+func _nearest_cake(p: Vector3) -> Dictionary:
+	var best := {}
+	var bd := 999.0
+	for c in cakes:
+		if not c["active"]:
+			continue
+		var d := p.distance_to(c["pos"])
+		if d < bd:
+			bd = d
+			best = c
+	return best
+
+
+func _ai_dir(u: Unit) -> Vector3:
+	var goal := u.pos
+	if u.target_unit != null and is_instance_valid(u.target_unit) and u.target_unit.alive:
+		goal = u.target_unit.pos
+		var d := u.pos.distance_to(goal)
+		if d < 1.7:
+			return Vector3.ZERO
+	elif u.has_waypoint:
+		goal = u.waypoint
+
+	var target := _route(u, goal)
+	var d := target - u.pos
+	d.y = 0.0
+	if d.length() < 0.4:
+		return Vector3.ZERO
+	var dir := d.normalized()
+	if u.stuck_t > 1.0:
+		# wedged against something: slide sideways rather than push forever
+		u.stuck_t = 0.0
+		dir = (dir + Vector3(-dir.z, 0.0, dir.x) * (1.0 if randf() < 0.5 else -1.0)).normalized()
+	return dir
+
+
+## Sends the unit through the castle gate instead of into a wall.
+## Two states only: in a castle, or on the field. If the goal is in another
+## region, walk to the gate point that crosses the wall.
+func _inside(team: int, p: Vector3) -> bool:
+	return p.x < -Bld.GATE_ABS if team == 0 else p.x > Bld.GATE_ABS
+
+
+func _castle_of(p: Vector3) -> int:
+	if _inside(0, p):
+		return 0
+	if _inside(1, p):
+		return 1
+	return -1
+
+
+func _flip(team: int) -> float:
+	return 1.0 if team == 0 else -1.0
+
+
+func _gate_out(team: int) -> Vector3:
+	return Bld.wpt(_flip(team), Bld.GATE_X - 2.0, 0.0)
+
+
+func _gate_in(team: int) -> Vector3:
+	return Bld.wpt(_flip(team), Bld.GATE_X + 2.5, 0.0)
+
+
+func _route(u: Unit, goal: Vector3) -> Vector3:
+	var cur := _castle_of(u.pos)
+	var dest := _castle_of(goal)
+	var base := goal
+	if dest == cur:
+		base = goal
+	elif cur != -1:
+		base = _gate_out(cur)
+	elif dest != -1:
+		base = _gate_in(dest)
+	# the river only has three crossings, so route through one of them
+	if Terrain.needs_bridge(u.pos, base):
+		return Terrain.bridge_step(u.pos, base)
+	return base
+
+
+func _auto_attack(u: Unit, aim: Vector3) -> void:
+	# a closed gate is a target even with nobody in sight
+	var g: Dictionary = gates[1 - u.team]
+	if not g.is_empty() and g["alive"] and _gate_reach(u) and u.brain != "worker":
+		u.attack(g["pos"])
+		return
+	if u.target_unit == null or not is_instance_valid(u.target_unit) or not u.target_unit.alive:
+		return
+	var d := u.pos.distance_to(u.target_unit.pos)
+	var reach := 2.0
+	if u.cls == "ranger":
+		reach = 15.0
+	elif u.cls == "mage":
+		reach = 11.0
+	if d <= reach:
+		var shot_at: Vector3 = u.target_unit.pos
+		if u.cls == "ranger":
+			# lead the shot: at 34 m/s an arrow takes long enough that a running
+			# target would otherwise always be missed
+			var travel: float = d / 34.0
+			shot_at += u.target_unit.vel * travel * 0.85
+		u.attack(shot_at)
+
+
+# ================================================================ tutorial
+func _update_tutorial(dt: float) -> void:
+	if tutorial_done:
+		return
+	tut_progress += player.pos.distance_to(tut_last_pos) if player != null and player.alive else 0.0
+	tut_last_pos = player.pos if player != null else Vector3.ZERO
+	match tutorial_step:
+		0:
+			if tut_progress > 5.0:
+				_advance_tutorial("GRAB A HAT", "Hats are classes. Walk onto one of the three hat stands beside you and press E. Warrior swings, ranger shoots, mage burns.")
+		1:
+			if player != null and player.cls != "worker":
+				_advance_tutorial("COLLECT CAKE", "Good. Now walk over a cake pile — the pink platters. You can carry three slices at once.")
+		2:
+			if player != null and player.cake > 0:
+				_advance_tutorial("FEED THE CAPTIVE", "Stand beside the BLUE Princess in your dungeon (the cage) and press F. Every slice makes her heavier, and a heavy princess is slow to steal back.")
+		3:
+			if blue_princess != null and blue_princess.weight >= 1.0:
+				_advance_tutorial("PRACTISE", "Now swing at the straw dummies with SPACE or LEFT CLICK. A worker's chisel is weak — the real damage is the hat you take next.")
+		4:
+			for dm in dummies:
+				if dm["hp"] < 60.0:
+					_advance_tutorial("RESCUE HER", "The RED Princess is locked in the BLUE dungeon across the field. Walk there, stand beside her and press E.")
+					return
+		5:
+			if player != null and player.carrying != null and player.carrying.team == 0:
+				_advance_tutorial("CARRY HER HOME", "Weight %d. The heavier she is, the slower you crawl, and allied soldiers standing with you add speed. Get her to your throne." % int(player.carrying.weight))
+		6:
+			if player != null and player.carrying != null:
+				ui.set_tutorial(7, 7, "CARRY HER HOME", "Weight %d — walk her to the throne in your castle. Then the hold begins." % int(player.carrying.weight))
+			if red_princess != null and red_princess.carried_by == null and red_princess.position.distance_to(castles[0]["throne"]) < 3.6:
+				tutorial_done = true
+				ui.set_tutorial(7, 7, "TUTORIAL COMPLETE", "That is the whole loop: feed the captive, rescue your own, hold the throne. Press H to start the real siege.")
+				ui.flash_banner("TUTORIAL COMPLETE", Color("e8b53f"), 3.0)
+	tut_last_pos = player.pos if player != null else Vector3.ZERO
+
+
+func _advance_tutorial(title: String, body: String) -> void:
+	tutorial_step += 1
+	ui.set_tutorial(tutorial_step + 1, 7, title, body)
+	ui.toast("step %d done" % tutorial_step)
+	add_shake(0.02)
+
+
+func _skip_tutorial_step() -> void:
+	if state != S_TUTORIAL:
+		return
+	if tutorial_done:
+		start_match(false)
+		return
+	tutorial_step = mini(tutorial_step + 1, 6)
+	ui.set_tutorial(tutorial_step + 1, 7, "STEP SKIPPED", "Move to the next objective. H skips again, or starts the real siege once training is done.")
+
+
+# ================================================================ hud / camera
+func _hud_data() -> Dictionary:
+	var d := {
+		"hp": 1.0, "cls": "worker", "cake": 0, "prompt": "", "hold_text": "", "hold_frac": 0.0,
+		"hold_red": true, "objectives": "",
+	}
+	if player != null and is_instance_valid(player):
+		d["hp"] = player.hp / maxf(player.max_hp, 1.0)
+		d["cls"] = player.cls
+		d["cake"] = player.cake
+	d["prompt"] = _prompt_text()
+	var rp := red_princess
+	var bp := blue_princess
+	var lines := []
+	if state == S_TUTORIAL:
+		lines.append("TRAINING GROUND")
+		lines.append("no enemies — learn the loop")
+	else:
+		if hold_red > 0.05:
+			d["hold_text"] = "HOLDING THE THRONE  %.1f s" % hold_red
+			d["hold_frac"] = hold_red / hold_target
+			d["hold_red"] = true
+		elif hold_blue > 0.05:
+			d["hold_text"] = "BLUE IS CROWNING — STOP THEM  %.1f s" % hold_blue
+			d["hold_frac"] = hold_blue / hold_target
+			d["hold_red"] = false
+		else:
+			d["hold_text"] = "RESCUE YOUR PRINCESS · HOLD THE THRONE %ds%s" % [
+				int(hold_target), "  ·  SUDDEN DEATH" if sudden else ""]
+		if bp != null:
+			lines.append("BLUE PRINCESS (captive)  weight %d" % int(bp.weight))
+			lines.append("  feed her cake to slow their rescue")
+		if not gates.is_empty():
+			var mg: Dictionary = gates[0]
+			lines.append("YOUR GATE  %d%%%s" % [int(100.0 * float(mg["hp"]) / float(mg["max"])),
+				"" if mg["alive"] else "  — BROKEN"])
+		if player != null and is_instance_valid(player) and player.cls == "worker":
+			lines.append("NO HAT  —  take one at a stand (E)")
+			lines.append("CARRYING  wood %d   ore %d" % [player.wood, player.metal])
+		if rp != null:
+			if rp.carried_by == player:
+				lines.append("RED PRINCESS  carried — get her to your throne")
+			elif rp.carried_by != null:
+				lines.append("RED PRINCESS  taken by blue!")
+			elif rp.position.distance_to(castles[0]["throne"]) < 3.6:
+				lines.append("RED PRINCESS  at your throne — hold!")
+			else:
+				lines.append("RED PRINCESS  in the blue dungeon")
+	d["objectives"] = "\n".join(lines)
+	return d
+
+
+func _prompt_text() -> String:
+	if player == null or not is_instance_valid(player) or not player.alive:
+		return ""
+	if player.carrying != null:
+		return "E drop her   ·   she is %s" % player.carrying.carry_speed_note()
+	var pr := _nearest_princess(player.pos, 3.2, true)
+	if pr != null:
+		if pr.team != player.team and player.cake > 0:
+			return "E carry princess   ·   F feed cake (%d)" % player.cake
+		if pr.team != player.team:
+			return "E carry princess   ·   find cake to feed her"
+		return "E carry your princess home"
+	var st := _nearest_hat(player.pos, 2.6)
+	if not st.is_empty():
+		return "E take the %s hat" % String(st["cls"]).to_upper()
+	var pile := _nearest_cake(player.pos)
+	if pile.size() > 0 and player.pos.distance_to(pile["pos"]) < 4.0:
+		return "walk over the cake to collect"
+	return ""
+
+
+func _update_interaction_label() -> void:
+	if state == S_TUTORIAL and tutorial_done:
+		hint_lbl.visible = true
+		hint_lbl.text = "press H to start the real siege"
+		hint_lbl.position = player.pos + Vector3(0, 2.9, 0)
+		near_lbl.visible = false
+		return
+	hint_lbl.visible = false
+	var pr := _nearest_princess(player.pos, 3.2, true)
+	if pr != null:
+		near_lbl.visible = true
+		near_lbl.text = "E — CARRY"
+		if pr.team != player.team:
+			near_lbl.text = "E — CARRY   ·   F — FEED"
+		near_lbl.position = pr.position + Vector3(0, 3.4, 0)
+		return
+	var st := _nearest_hat(player.pos, 2.6)
+	if not st.is_empty():
+		near_lbl.visible = true
+		near_lbl.text = "E — %s HAT" % String(st["cls"]).to_upper()
+		near_lbl.position = st["pos"] + Vector3(0, 2.6, 0)
+		return
+	near_lbl.visible = false
+
+
+## True when something solid sits between the unit and the camera.
+## Terrain, wall decks and every solid rectangle are checked, so a figure in a
+## courtyard is hidden by the wall it stands behind.
+func _is_occluded(target: Vector3) -> bool:
+	var dir := cam_dir.normalized()
+	# 34 samples over 34 m is ~1 m apart: a 2.6 m wall can never slip between them
+	var steps := 34
+	var dist := 34.0
+	var start := target + dir * dist
+	for k in range(1, steps):
+		var t := float(k) / float(steps)
+		var p: Vector3 = start.lerp(target, t)
+		if Terrain.h(p.x, p.z) > p.y + 0.05:
+			return true
+		var flat := Vector2(p.x, p.z)
+		for s in solids:
+			var rr: Rect2 = s["r"]
+			if p.y < float(s["top"]) and rr.has_point(flat):
+				return true
+	return false
+
+
+## A unit is outlined when something covers either its chest or its head — a
+## low wall hides the legs but a real wall hides the head, and that is the case
+## people actually notice.
+func _unit_hidden(u: Unit) -> bool:
+	if _is_occluded(u.position + Vector3(0, 2.0, 0)):
+		return true
+	return _is_occluded(u.position + Vector3(0, 1.1, 0))
+
+
+var occ_t := 0.0
+
+
+func _update_silhouettes(dt: float) -> void:
+	occ_t += dt
+	if occ_t < 0.05:
+		return
+	occ_t = 0.0
+	for u: Unit in units:
+		if not is_instance_valid(u):
+			continue
+		if not u.alive:
+			u.show_silhouette(false)
+			continue
+		if u.position.distance_to(cam_focus) > 60.0:
+			u.show_silhouette(false)
+			continue
+		u.show_silhouette(showsil or _unit_hidden(u))
+
+
+func _update_camera(dt: float) -> void:
+	zoom = Core.damp(zoom, zoom_target, 8.0, dt)
+	camera.size = zoom
+	if state == S_MENU:
+		menu_t += dt * 0.10
+		var focus := Vector3(0, 0, 0)
+		var dir := Vector3(sin(menu_t), 0.0, cos(menu_t)) * 0.82 + Vector3(0, 0.95, 0)
+		camera.position = focus + dir.normalized() * 90.0
+		camera.look_at(focus)
+		return
+	cam_yaw = lerp_angle(cam_yaw, cam_yaw_target, 1.0 - exp(-9.0 * dt))
+	cam_dir = Vector3(sin(cam_yaw) * CAM_HORIZ, CAM_HEIGHT, cos(cam_yaw) * CAM_HORIZ).normalized()
+	var focus2 := cam_focus
+	if player != null and is_instance_valid(player) and demo == "":
+		focus2 = player.position
+	if demo != "":
+		# demo shots own the camera: the match setup resets it otherwise
+		focus2 = demo_focus
+		zoom = demo_zoom
+		cam_focus = demo_focus
+	cam_focus = cam_focus.lerp(focus2, 1.0 - exp(-6.0 * dt))
+	shake = maxf(0.0, shake - dt * 2.2)
+	var off := Vector3.ZERO
+	if shake > 0.0:
+		off = Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-1, 1)) * shake
+	camera.position = cam_focus + cam_dir * 90.0 + off
+	camera.look_at(cam_focus + off * 0.5)
+
+
+func _autoplay_actions() -> void:
+	if player == null or not player.alive:
+		return
+	if player.carrying != null:
+		if player.pos.distance_to(castles[0]["throne"]) < 2.8:
+			drop_princess(player)
+		return
+	var pr := _nearest_princess(player.pos, 3.0, true)
+	if pr != null:
+		if pr.team == 0 and pr.position.distance_to(castles[0]["throne"]) > 3.6:
+			pick_up(pr, player)
+		elif player.cake > 0:
+			player.cake -= 1
+			pr.add_weight(1.0)
+
+
+func _autoplay_input(dt: float) -> Vector2:
+	# Simple driver for headless smoke runs: push toward the enemy dungeon.
+	autoplay_t += dt
+	if player == null:
+		return Vector2.ZERO
+	var goal: Vector3
+	if player.carrying != null:
+		goal = castles[0]["throne"]
+	elif red_princess != null and red_princess.carried_by == null and red_princess.position.distance_to(castles[0]["throne"]) > 3.6:
+		goal = red_princess.position
+	elif blue_princess != null and player.cake == 0:
+		goal = castles[0]["dungeon"]
+	else:
+		goal = blue_princess.position
+	var want := _route(player, goal)
+	_last_goal = goal
+	_last_want = want
+	var d := want - player.pos
+	d.y = 0.0
+	if d.length() < 0.3:
+		return Vector2.ZERO
+	var cam_fwd := -camera.global_transform.basis.z
+	cam_fwd.y = 0.0
+	cam_fwd = cam_fwd.normalized()
+	var cam_right := camera.global_transform.basis.x
+	cam_right.y = 0.0
+	cam_right = cam_right.normalized()
+	var n := d.normalized()
+	return Vector2(n.dot(cam_right), n.dot(cam_fwd))
+
+
+# ================================================================ input
+func _unhandled_input(event: InputEvent) -> void:
+	if state == S_MENU and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ENTER or event.keycode == KEY_KP_ENTER or event.keycode == KEY_SPACE:
+			start_match(false)
+			return
+		if event.keycode == KEY_T:
+			start_match(true)
+			return
+	if event.is_action_pressed("ui_cancel"):
+		if state == S_PLAY or state == S_TUTORIAL:
+			_set_pause(true)
+		elif state == S_PAUSE:
+			_set_pause(false)
+		return
+	if event.is_action_pressed("help"):
+		if state == S_TUTORIAL:
+			_skip_tutorial_step()
+		else:
+			ui.help.visible = not ui.help.visible
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_R:
+		cam_yaw_target = fposmod(cam_yaw_target + PI * 0.5, TAU)
+		ui.toast("camera turned")
+		return
+	if event is InputEventKey and event.pressed and event.physical_keycode == KEY_M:
+		muted = not muted
+		AudioServer.set_bus_mute(0, muted)
+		ui.toast("sound " + ("off" if muted else "on"))
+		return
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			zoom_target = clampf(zoom_target - 1.8, 18.0, 44.0)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			zoom_target = clampf(zoom_target + 1.8, 18.0, 44.0)
+
+
+var pause_prev := S_PLAY
+
+func _set_pause(v: bool) -> void:
+	if v and (state == S_PLAY or state == S_TUTORIAL):
+		pause_prev = state
+		state = S_PAUSE
+		ui.show_pause(true)
+	elif not v and state == S_PAUSE:
+		state = pause_prev
+		ui.show_pause(false)

@@ -1,0 +1,5 @@
+.git
+.godot
+build/web/index.wasm.bak
+*.tmp
+soak-out.json

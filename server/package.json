@@ -1,0 +1,15 @@
+{
+  "name": "capture-the-princess-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authoritative-ish room relay for Capture The Princess: 20 Hz snapshots, 100 players per room, side selection on join.",
+  "main": "index.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node index.js",
+    "soak": "node soak.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
