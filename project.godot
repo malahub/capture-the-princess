@@ -5,7 +5,7 @@ config_version=5
 
 [application]
 
-config/name="Heavy Flag"
+config/name="Capture The Princess"
 config/description="Isometric 3D castle siege: rescue your princess, feed the enemy's cake so she is too heavy to move."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")

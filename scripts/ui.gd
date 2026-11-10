@@ -4,6 +4,7 @@ extends CanvasLayer
 
 signal play_pressed
 signal tutorial_pressed
+signal online_pressed(team: int)
 signal resume_pressed
 signal restart_pressed
 signal menu_pressed
@@ -159,6 +160,15 @@ func mk_label(parent: Node, text: String, fsize: int, color: Color = IVORY,
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(l)
 	return l
+
+
+func _btn_style(bg: Color, edge: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = bg
+	sb.border_color = edge
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(4)
+	return sb
 
 
 func mk_button(parent: Node, text: String, cb: Callable, y: float) -> Button:
@@ -399,6 +409,23 @@ func _build_menu() -> void:
 		"Shoots a carrier off the princess from across the field. Fragile in a brawl.")
 	_roster_row(536, "mage", Color("a479e0"), "MAGE", "170 HP   ·   slow   ·   splash damage",
 		"Fireball that splashes. The answer to a crowd camping the throne.")
+
+	# ---- online: pick a side and drop into a shared room (solo is untouched)
+	var bar := HBoxContainer.new()
+	bar.position = Vector2(846, 668)
+	bar.add_theme_constant_override("separation", 10)
+	menu.add_child(bar)
+	var olabel := mk_label(bar, "JOIN ONLINE", 15, GOLD, Vector2.ZERO, 150, 24)
+	olabel.custom_minimum_size = Vector2(150, 34)
+	for side in [0, 1]:
+		var b := mk_button(bar, "RED" if side == 0 else "BLUE", func(): online_pressed.emit(side), 0)
+		b.custom_minimum_size = Vector2(104, 34)
+		b.size = Vector2(104, 34)
+		b.add_theme_font_size_override("font_size", 15)
+		if side == 1:
+			b.add_theme_stylebox_override("normal", _btn_style(Color("3364cc"), Color("5b8bf0")))
+	var osub := mk_label(menu, "100 players per room · you pick a side on join", 13,
+		Color(0.62, 0.68, 0.78), Vector2(846, 706), 660, 20)
 
 	var hintplate := ColorRect.new()
 	hintplate.color = Color(0.03, 0.05, 0.09, 0.68)

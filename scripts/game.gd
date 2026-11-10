@@ -94,6 +94,7 @@ var hattest := false
 var showsil := false
 var camtest := false
 var sudden_applied := false
+var net: Net = null
 var input_debug := false
 var spawn_at := Vector3(9999, 0, 0)
 var autoplay_t := 0.0
@@ -167,6 +168,7 @@ func _ready() -> void:
 	if demo != "":
 		start_match(false)
 		_setup_demo()
+	_setup_net()
 	if start_help:
 		ui.help.visible = true
 	if click_target != "":
@@ -807,6 +809,40 @@ func _demo_princess() -> Princess:
 				bd = d
 				best = pr
 	return best
+
+
+func _setup_net() -> void:
+	net = Net.new()
+	net.game = self
+	net.world = world
+	add_child(net)
+	net.connected.connect(_on_net_connected)
+	net.failed.connect(_on_net_failed)
+	ui.online_pressed.connect(_join_online)
+
+
+func _join_online(team: int) -> void:
+	if net == null:
+		return
+	net.my_team = team
+	net.room = "public"
+	net.join(team, "player")
+	ui.toast("joining the %s side…" % ("red" if team == 0 else "blue"))
+
+
+func _on_net_connected() -> void:
+	start_match(false)
+	net.world = world
+	if player != null:
+		player.team = net.my_team
+		player.set_class(player.cls)
+	ui.flash_banner("%s SIDE — ONLINE" % ("RED" if net.my_team == 0 else "BLUE"),
+		Color("cf3f36") if net.my_team == 0 else Color("3364cc"), 2.2)
+	ui.toast("in the room — other players appear as ghosts")
+
+
+func _on_net_failed(why: String) -> void:
+	ui.toast("online unavailable (%s) — solo still works" % why)
 
 
 func _parse_args() -> void:
@@ -2657,6 +2693,8 @@ func _hud_data() -> Dictionary:
 			var mg: Dictionary = gates[0]
 			lines.append("YOUR GATE  %d%%%s" % [int(100.0 * float(mg["hp"]) / float(mg["max"])),
 				"" if mg["alive"] else "  — BROKEN"])
+		if net != null and net.open:
+			lines.append("ONLINE  ·  %d here  ·  %d v %d" % [net.peer_count() + 1, net.score[0], net.score[1]])
 		if player != null and is_instance_valid(player) and player.cls == "worker":
 			lines.append("NO HAT  —  take one at a stand (E)")
 			lines.append("CARRYING  wood %d   ore %d" % [player.wood, player.metal])

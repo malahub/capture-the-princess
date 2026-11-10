@@ -621,6 +621,49 @@ static func dummy(parent: Node3D, p: Vector3) -> Node3D:
 
 # ================================================================= fighters
 ## Returns a rigged fighter model. `root` is at the feet; `body` bobs; `arm` swings.
+## A networked player: deliberately cheap (two primitives and a tag) so a room
+## of 100 renders without touching the unit rig.
+static func remote_ghost(parent: Node3D, team: int, cls: String) -> Node3D:
+	var col := team_col(team)
+	var n := Node3D.new()
+	parent.add_child(n)
+	var body := MeshInstance3D.new()
+	var cap := CapsuleMesh.new()
+	cap.radius = 0.32
+	cap.height = 1.45
+	body.mesh = cap
+	body.material_override = Core.mat(col, 0.85)
+	body.position = Vector3(0, 0.78, 0)
+	n.add_child(body)
+	var head := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.24
+	sm.height = 0.46
+	head.mesh = sm
+	head.material_override = Core.mat(Core.SKIN, 0.7)
+	head.position = Vector3(0, 1.62, 0)
+	n.add_child(head)
+	# class marker so you can read a crowd at a glance
+	var marker := Node3D.new()
+	marker.position = Vector3(0, 1.95, 0)
+	n.add_child(marker)
+	match cls:
+		"warrior":
+			Core.box(marker, Vector3(0.44, 0.10, 0.10), Vector3.ZERO, Core.STONE_LIGHT)
+			Core.box(marker, Vector3(0.08, 0.22, 0.30), Vector3.ZERO, Core.RED)
+		"ranger":
+			Core.cyl(marker, 0.02, 0.30, 0.26, Vector3(0, 0.05, 0), Core.GREEN, Vector3.ZERO, 8)
+		"mage":
+			Core.cyl(marker, 0.02, 0.28, 0.40, Vector3(0, 0.1, 0), Core.PURPLE, Vector3.ZERO, 8)
+		_:
+			Core.cyl(marker, 0.26, 0.28, 0.10, Vector3.ZERO, Core.WOOD, Vector3.ZERO, 8)
+	var tag := Core.label3d(n, "P", Vector3(0, 2.35, 0), 40, col.lightened(0.35))
+	tag.name = "Tag"
+	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	tag.no_depth_test = true
+	return n
+
+
 ## A limb built as two tapered segments around a joint node so the walk cycle
 ## can bend it properly: shoulder -> elbow -> hand, hip -> knee -> foot.
 static func _limb(parent: Node3D, at: Vector3, up_len: float, lo_len: float,
