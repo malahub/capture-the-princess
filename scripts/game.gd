@@ -273,9 +273,12 @@ func _run_nettest() -> void:
 	var welcomed: bool = net.my_id > 0
 	peer.close()
 	net.close()
-	print("[HF] NETTEST welcomed=%s peers=%d ghost_node=%s t=%.1f  %s" % [
-		str(welcomed), seen, str(got_ghost), t,
-		"PASS" if (net.my_id > 0 and got_peer and got_ghost) else "FAIL"])
+	if not welcomed and seen == 0:
+		print("[HF] NETTEST SKIP — no local relay on %s (start server/: node index.js)" % url)
+	else:
+		print("[HF] NETTEST welcomed=%s peers=%d ghost_node=%s t=%.1f  %s" % [
+			str(welcomed), seen, str(got_ghost), t,
+			"PASS" if (welcomed and got_peer and got_ghost) else "FAIL"])
 	get_tree().quit()
 
 
