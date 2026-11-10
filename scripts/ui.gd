@@ -360,7 +360,8 @@ func _build_menu() -> void:
 	_card(Rect2(824, 92, 704, 620))
 
 	# ---- left: title and the three doors in
-	var t := mk_label(menu, "HEAVY FLAG", 82, GOLD, Vector2(88, 116), 704)
+	var t := mk_label(menu, "CAPTURE THE PRINCESS", 44, GOLD, Vector2(88, 118), 704)
+	t.add_theme_constant_override("outline_size", 0)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var sub := mk_label(menu, "an isometric siege of cake, crowns\nand very fat princesses", 21, IVORY,
 		Vector2(88, 212), 704, 74)
@@ -401,18 +402,18 @@ func _build_menu() -> void:
 	var hdr := mk_label(menu, "THE ROSTER", 30, GOLD, Vector2(846, 104))
 	var hsub := mk_label(menu, "hats stand in your castle — stand on one and press E to become that unit",
 		15, Color(0.66, 0.72, 0.8), Vector2(846, 142), 660, 24)
-	_roster_row(170, "worker", Color("c39a5e"), "WORKER  ·  YOU SPAWN HERE", "160 HP   ·   5.3   ·   11 dmg chisel",
+	_roster_row(158, "worker", Color("c39a5e"), "WORKER  ·  YOU SPAWN HERE", "160 HP   ·   5.3   ·   11 dmg chisel",
 		"No hat, no class. Chop wood and ore, repair your gate, and feed the stands that upgrade the whole team — then take a hat.")
-	_roster_row(292, "warrior", Color("a8b0ba"), "WARRIOR", "240 HP   ·   slow   ·   2.2 m arc",
+	_roster_row(280, "warrior", Color("a8b0ba"), "WARRIOR", "240 HP   ·   slow   ·   2.2 m arc",
 		"The front line. Widest swing in the game and the health to hold a doorway.")
-	_roster_row(414, "ranger", Color("6fb35f"), "RANGER", "150 HP   ·   quick   ·   15 m range",
+	_roster_row(402, "ranger", Color("6fb35f"), "RANGER", "150 HP   ·   quick   ·   15 m range",
 		"Shoots a carrier off the princess from across the field. Fragile in a brawl.")
-	_roster_row(536, "mage", Color("a479e0"), "MAGE", "170 HP   ·   slow   ·   splash damage",
+	_roster_row(524, "mage", Color("a479e0"), "MAGE", "170 HP   ·   slow   ·   splash damage",
 		"Fireball that splashes. The answer to a crowd camping the throne.")
 
 	# ---- online: pick a side and drop into a shared room (solo is untouched)
 	var bar := HBoxContainer.new()
-	bar.position = Vector2(846, 668)
+	bar.position = Vector2(846, 648)
 	bar.add_theme_constant_override("separation", 10)
 	menu.add_child(bar)
 	var olabel := mk_label(bar, "JOIN ONLINE", 15, GOLD, Vector2.ZERO, 150, 24)
@@ -424,8 +425,8 @@ func _build_menu() -> void:
 		b.add_theme_font_size_override("font_size", 15)
 		if side == 1:
 			b.add_theme_stylebox_override("normal", _btn_style(Color("3364cc"), Color("5b8bf0")))
-	var osub := mk_label(menu, "100 players per room · you pick a side on join", 13,
-		Color(0.62, 0.68, 0.78), Vector2(846, 706), 660, 20)
+	var osub := mk_label(menu, "100 per room · pick a side", 12,
+		Color(0.62, 0.68, 0.78), Vector2(846, 690), 400, 18)
 
 	var hintplate := ColorRect.new()
 	hintplate.color = Color(0.03, 0.05, 0.09, 0.68)
