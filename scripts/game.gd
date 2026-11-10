@@ -94,6 +94,7 @@ var hattest := false
 var nettest := false
 var keyflow := false
 var shottest := false
+var pathaudit := false
 var fire_at_frame := -1
 var fire_shot: Dictionary = {}
 var showsil := false
@@ -133,6 +134,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if pathaudit:
+		_run_pathaudit()
 		return
 	if shottest:
 		_run_shottest()
@@ -198,6 +202,64 @@ func _ready() -> void:
 		start_match(false)
 	elif start_tutorial:
 		start_match(true)
+
+
+## Walks the nav graph to every height in the game and checks the surface it
+## crosses never jumps more than a unit can step.
+func _run_pathaudit() -> void:
+	start_match(false)
+	var walkable := 0
+	for i in Nav.cells.size():
+		if Nav.cells[i] == 1:
+			walkable += 1
+	var from: Vector3 = castles[0]["spawn"]
+	var goals: Array = [
+		["wall walk", Vector3(-(Bld.BACK_X + Bld.CASTLE_SHIFT), 0.0, 0.0)],
+		["shrine terrace", Vector3(castles[0]["key_pos"].x, 0.0, castles[0]["key_pos"].z)],
+		["middle bridge", Vector3(0.0, 0.0, 0.0)],
+		["north bridge", Vector3(0.0, 0.0, Terrain.BRIDGE_Z[2])],
+		["enemy courtyard", castles[1]["spawn"]],
+		["assault ramp crest", Vector3(-Terrain.RAMP_X, 0.0, Terrain.RAMP_Z)],
+	]
+	var bad := 0
+	var lines: Array = []
+	var t0 := Time.get_ticks_msec()
+	for g in goals:
+		var goal: Vector3 = g[1]
+		var path: Array = Nav.find_path(from, goal)
+		var ok_len: bool = path.size() > 0
+		var worst := 0.0
+		var prev := from
+		for wp in path:
+			var p: Vector3 = wp
+			var leg: float = prev.distance_to(p)
+			var nseg: int = maxi(1, int(leg / 0.4))
+			var hprev: float = Terrain.h(prev.x, prev.z)
+			for s2 in range(1, nseg + 1):
+				var t2 := float(s2) / float(nseg)
+				var q := prev.lerp(p, t2)
+				var hq: float = Terrain.h(q.x, q.z)
+				worst = maxf(worst, absf(hq - hprev))
+				hprev = hq
+			prev = p
+		var ok_step: bool = worst <= Terrain.STEP_UP + 0.001
+		if not (ok_len and ok_step):
+			bad += 1
+		lines.append("%s:%d/%s" % [g[0], path.size(), "ok" if (ok_len and ok_step) else "BAD %.2f" % worst])
+		if not (ok_len and ok_step):
+			var clear_direct: bool = Nav._clear(from, goal)
+			var a := Nav.snap(from)
+			var b := Nav.snap(goal)
+			print("[HF]   %s: clear=%s cells a=%d(h=%.2f) b=%d(h=%.2f) hs=%s" % [g[0], str(clear_direct), a,
+				Terrain.h(Nav.centre(a).x, Nav.centre(a).z) if a >= 0 else -99.0,
+				b, Terrain.h(Nav.centre(b).x, Nav.centre(b).z) if b >= 0 else -99.0,
+				str(path.map(func(v): return "(%0.1f,%0.1f h%0.1f)" % [v.x, v.z, Terrain.h(v.x, v.z)]))])
+	var took := Time.get_ticks_msec() - t0
+	print("[HF] PATHAUDIT cells=%d/%d (%.0f%%) %s" % [walkable, Nav.cells.size(),
+		100.0 * float(walkable) / float(Nav.cells.size()), " | ".join(lines)])
+	print("[HF] PATHAUDIT %d goals in %d ms  %s" % [goals.size(), took,
+		"PASS" if bad == 0 else "FAIL"])
+	get_tree().quit()
 
 
 func _run_shottest() -> void:
@@ -1053,6 +1115,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--pathaudit":
+			pathaudit = true
 		elif a == "--shottest":
 			shottest = true
 		elif a == "--keyflow":
@@ -1250,6 +1314,7 @@ func start_match(is_tutorial: bool) -> void:
 			place(r, castles[0]["spawn"] + Vector3(float(i) * 1.8, 0, -1.4 - float(i) * 0.6))
 			r.brain = ally_brains[i]
 			units.append(r)
+	Nav.build(solids)
 	cam_focus = player.pos
 	camera.size = zoom
 	ui.ui_guard = 0.5
@@ -1485,7 +1550,7 @@ func _step(dt: float) -> void:
 			continue
 		if u == player:
 			continue
-		var dir := _ai_dir(u)
+		var dir := _ai_dir(u, dt)
 		var aim := u.target_unit.pos if (u.target_unit != null and is_instance_valid(u.target_unit)) else u.waypoint
 		u.update_unit(dt, dir, aim)
 		_auto_attack(u, aim)
@@ -2912,25 +2977,60 @@ func _nearest_cake(p: Vector3) -> Dictionary:
 	return best
 
 
-func _ai_dir(u: Unit) -> Vector3:
+func _ai_dir(u: Unit, dt: float) -> Vector3:
 	var goal := u.pos
+	var chasing := false
 	if u.target_unit != null and is_instance_valid(u.target_unit) and u.target_unit.alive:
 		goal = u.target_unit.pos
+		chasing = true
 		var d := u.pos.distance_to(goal)
 		if d < 1.7:
 			return Vector3.ZERO
 	elif u.has_waypoint:
 		goal = u.waypoint
-
-	var target := _route(u, goal)
-	var d := target - u.pos
-	d.y = 0.0
-	if d.length() < 0.4:
+	else:
 		return Vector3.ZERO
-	var dir := d.normalized()
-	if u.stuck_t > 1.0:
-		# wedged against something: slide sideways rather than push forever
+
+	var flat := Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z)
+	if flat.length() < 0.5:
+		return Vector3.ZERO
+
+	u.path_t -= dt
+	# replan when the path is empty, the goal moved, or the cooldown lapsed
+	var stale: bool = u.path.is_empty() or u.path_i >= u.path.size()
+	var moved: bool = u.path_goal.distance_to(goal) > 2.6
+	# the cooldown gates the replan: a chasing unit's goal moves every frame, and
+	# replanning on that alone stalls the whole match
+	if u.path_t <= 0.0 and (stale or moved):
+		u.path = Nav.find_path(u.pos, goal)
+		u.path_i = 0
+		u.path_goal = goal
+		u.path_t = 0.6 + randf() * 0.5      # stagger so 100 units don't replan together
+		if u.path.is_empty() and not Nav.built:
+			return flat.normalized()        # nav unavailable: straight line fallback
+
+	var target := goal
+	while u.path_i < u.path.size():
+		var wp: Vector3 = u.path[u.path_i]
+		if u.pos.distance_to(wp) < 0.75:
+			u.path_i += 1
+			continue
+		target = wp
+		break
+	if u.path_i >= u.path.size():
+		target = goal
+
+	var d2 := Vector3(target.x - u.pos.x, 0.0, target.z - u.pos.z)
+	if d2.length() < 0.15:
+		return Vector3.ZERO
+	var dir := d2.normalized()
+	if chasing and u.pos.distance_to(goal) < 2.0:
+		dir = Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z).normalized()
+
+	# last resort when wedged against another body: sidestep once
+	if u.stuck_t > 1.2:
 		u.stuck_t = 0.0
+		u.path_t = 0.0
 		dir = (dir + Vector3(-dir.z, 0.0, dir.x) * (1.0 if randf() < 0.5 else -1.0)).normalized()
 	return dir
 

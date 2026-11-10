@@ -222,7 +222,9 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 			tower(n, wpt(flip, tx, tz), col, dark, light, solids, flip)
 
 	# --- stairs onto the parapet ----------------------------------------
-	var stair_x := BACK_X - 4.0
+	# flush against the wall face: at BACK_X-4.0 a 0.8 m strip of courtyard sat
+	# between the top tread and the parapet, which no unit could cross
+	var stair_x := BACK_X - 2.7
 	for sz2 in [-1.0, 1.0]:
 		stair_run(n, flip, stair_x, sz2, solids)
 

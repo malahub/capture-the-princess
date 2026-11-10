@@ -511,7 +511,6 @@ func _build_hud() -> void:
 	key_arrow = KeyArrow.new()
 	key_arrow.game = game
 	key_arrow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	key_arrow.size = Vector2(1600, 900)
 	key_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(key_arrow)
 

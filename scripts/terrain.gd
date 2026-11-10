@@ -73,8 +73,10 @@ static func h_terrain(x: float, z: float) -> float:
 ## instead of battering the gate. Mirrored per side.
 static func h_ramp(x: float, z: float) -> float:
 	var out := 0.0
-	out += _bump(x, z, -RAMP_X, RAMP_Z, 16.0, RAMP_H)
-	out += _bump(x, z, RAMP_X, -RAMP_Z, 16.0, RAMP_H)
+	# 24 m radius keeps the worst gradient (~0.5 m per metre) inside the step
+	# rule; at 16 m the mid-slope was too steep to walk, only to jump onto
+	out += _bump(x, z, -RAMP_X, RAMP_Z, 24.0, RAMP_H)
+	out += _bump(x, z, RAMP_X, -RAMP_Z, 24.0, RAMP_H)
 	# clipped at the wall line: the courtyard stays flat, the bank outside stays
 	# tall, and the join hides inside the 3.6 m thickness of the wall
 	return out * smoothstep(15.0, 18.6, absf(z))
