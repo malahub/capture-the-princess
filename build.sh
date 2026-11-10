@@ -31,3 +31,7 @@ echo "== artifacts"
 ls -lh build/web | tail -n +2 | awk '{printf "  %-28s %s\n", $9, $5}'
 echo
 echo "serve: python3 scripts/serve-web.sh"
+
+# the export writes the project name into the shell; keep the shipped title in step
+sed -i 's|<title>Heavy Flag</title>|<title>Capture The Princess</title>|' build/web/index.html
+sed -i 's|"projectName": *"Heavy Flag"|"projectName": "Capture The Princess"|' build/web/index.html
