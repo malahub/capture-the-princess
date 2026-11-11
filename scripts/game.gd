@@ -3377,7 +3377,7 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	# it, so a chaser used to press into the platform for the rest of the match.
 	# Hold at standoff range instead: still a threat, no longer a pile of bodies
 	# jammed against a wall.
-	if chasing and is_instance_valid(u.target_unit):
+	if u.target_unit != null and is_instance_valid(u.target_unit):
 		var th: float = Terrain.h(u.target_unit.pos.x, u.target_unit.pos.z)
 		var uh: float = Terrain.h(u.pos.x, u.pos.z)
 		if absf(th - uh) > Terrain.STEP_UP:

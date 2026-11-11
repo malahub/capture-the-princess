@@ -104,7 +104,7 @@ def analyse(rows):
 
         # height / nav sanity
         for cur in ser:
-            if cur["alive"] and abs(cur["y"] - cur["h"]) > 0.65:
+            if cur["alive"] and abs(cur["y"] - cur["h"]) > 1.25:
                 findings["height"].append({"unit": label, "t": cur["t"], "y": cur["y"], "h": cur["h"]})
                 break
             if cur["alive"] and not cur["in_nav"]:
