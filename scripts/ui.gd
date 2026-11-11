@@ -507,7 +507,7 @@ func _build_hud() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hud)
 
-	fps_label = mk_label(hud, "", 15, Color(0.75, 0.95, 0.75), Vector2(24, 156), 320, 22)
+	fps_label = mk_label(hud, "", 15, Color(0.75, 0.95, 0.75), Vector2(24, 862), 420, 22)
 	fps_label.visible = false
 
 	# edge arrow for a key that is off screen
