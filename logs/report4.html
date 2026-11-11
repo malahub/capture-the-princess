@@ -1,0 +1,162 @@
+<!doctype html><meta charset="utf-8"><title>CTP telemetry report</title>
+<style>
+body{background:#0f1319;color:#dde3ec;font:14px/1.5 ui-monospace,Menlo,monospace;margin:32px}
+h1{color:#e8b53f;font-size:22px;margin:0 0 4px}
+h2{font-size:15px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid #2a3240}
+h2.good{color:#6fd18a} h2.bad{color:#ff6b5e}
+h2 span{float:right;font-weight:400;opacity:.8}
+table{border-collapse:collapse;width:100%;margin-bottom:8px}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #202834}
+th{color:#8d99aa;font-weight:400;font-size:12px;text-transform:uppercase}
+td.ok{color:#6fd18a}
+.meta{color:#8d99aa;margin-bottom:12px}
+</style>
+<h1>Capture The Princess — 10 v 10 telemetry</h1>
+<div class="meta">256.0 s · 30 units · 7650 samples ·
+ stuck 93 · idle 14 · pathfail 9 · osc 19 ·
+ overlap 0 · height 0 · offnav 18</div>
+<h2 class='bad'>Stuck (goal, no movement) <span>93</span></h2>
+<table><tr><th>unit</th><th>t</th><th>x</th><th>z</th><th>wp</th><th>path</th><th>stuck_t</th><th>tgt</th></tr>
+<tr><td>#84179 mage/attacker</td><td>205.8</td><td>58.5</td><td>-1.3</td><td>[-41.4, 0.0]</td><td>0/43</td><td>0.6</td><td>True</td></tr>
+<tr><td>#84179 mage/attacker</td><td>226.9</td><td>58.5</td><td>-0.8</td><td>[-41.4, 0.0]</td><td>0/21</td><td>0.0</td><td>True</td></tr>
+<tr><td>#84179 mage/attacker</td><td>232.9</td><td>58.5</td><td>-0.8</td><td>[-41.4, 0.0]</td><td>0/25</td><td>0.7</td><td>True</td></tr>
+<tr><td>#84179 mage/attacker</td><td>246.0</td><td>58.5</td><td>-0.8</td><td>[-41.4, 0.0]</td><td>0/25</td><td>1.2</td><td>True</td></tr>
+<tr><td>#84179 mage/attacker</td><td>256.0</td><td>58.5</td><td>-1.3</td><td>[-41.4, 0.0]</td><td>0/15</td><td>0.9</td><td>True</td></tr>
+<tr><td>#74800 warrior/ally</td><td>41.1</td><td>-58.5</td><td>-2.7</td><td>[41.4, 0.0]</td><td>0/10</td><td>1.2</td><td>True</td></tr>
+<tr><td>#74800 warrior/ally</td><td>47.2</td><td>-58.5</td><td>-2.7</td><td>[41.4, 0.0]</td><td>0/38</td><td>0.4</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>48.2</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/37</td><td>0.3</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>69.3</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/10</td><td>0.9</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>106.4</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/32</td><td>0.6</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>145.6</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/40</td><td>1.1</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>169.7</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/61</td><td>0.7</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>181.7</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/42</td><td>0.5</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>213.9</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/45</td><td>0.1</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>220.9</td><td>-58.5</td><td>-1.3</td><td>[41.4, 0.0]</td><td>0/72</td><td>1.0</td><td>True</td></tr>
+<tr><td>#94048 ranger/ally</td><td>233.9</td><td>-58.5</td><td>-1.3</td><td>[54.1, 9.9]</td><td>0/85</td><td>0.8</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>8.0</td><td>-41.3</td><td>-14.7</td><td>[-42.5, -13.9]</td><td>0/1</td><td>1.2</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>106.4</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.7</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>113.5</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.1</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>135.5</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.2</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>145.6</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.4</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>169.7</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>1.0</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>181.7</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.7</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>213.9</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.2</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>220.9</td><td>-41.2</td><td>-14.8</td><td>[-42.5, -13.9]</td><td>0/1</td><td>0.7</td><td>False</td></tr>
+<tr><td>#99381 mage/feeder</td><td>233.9</td><td>-41.2</td><td>-14.8</td><td>[54.1, 9.9]</td><td>0/87</td><td>0.6</td><td>False</td></tr>
+<tr><td>#78110 worker/worker</td><td>18.1</td><td>-42.1</td><td>14.8</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.0</td><td>False</td></tr>
+<tr><td>#70754 warrior/rescuer</td><td>241.9</td><td>-41.1</td><td>7.8</td><td>[54.1, 9.9]</td><td>0/1</td><td>0.1</td><td>False</td></tr>
+<tr><td>#90002 ranger/feeder</td><td>21.1</td><td>-42.0</td><td>-14.1</td><td>[-42.5, -13.9]</td><td>1/1</td><td>0.0</td><td>False</td></tr>
+<tr><td>#95335 mage/attacker</td><td>240.9</td><td>-42.1</td><td>-19.2</td><td>[54.1, 9.9]</td><td>0/0</td><td>0.5</td><td>False</td></tr>
+<tr><td>#95335 mage/attacker</td><td>245.0</td><td>-42.1</td><td>-19.2</td><td>[54.1, 9.9]</td><td>0/0</td><td>0.1</td><td>False</td></tr>
+<tr><td>#95335 mage/attacker</td><td>254.0</td><td>-42.1</td><td>-19.2</td><td>[54.1, 9.9]</td><td>0/0</td><td>1.1</td><td>False</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>126.5</td><td>0.5</td><td>-5.5</td><td>[41.4, 0.0]</td><td>0/0</td><td>0.7</td><td>True</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>192.8</td><td>0.5</td><td>-5.5</td><td>[41.4, 0.0]</td><td>0/0</td><td>0.7</td><td>True</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>236.9</td><td>0.5</td><td>-5.5</td><td>[54.5, 9.6]</td><td>0/0</td><td>1.1</td><td>False</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>248.0</td><td>0.5</td><td>-5.5</td><td>[54.5, 9.6]</td><td>0/0</td><td>0.2</td><td>False</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>254.0</td><td>0.5</td><td>-5.5</td><td>[54.5, 9.6]</td><td>0/0</td><td>1.1</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>18.1</td><td>-43.0</td><td>14.8</td><td>[-39.7, -1.3]</td><td>0/25</td><td>0.0</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>113.5</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.7</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>135.5</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.9</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>145.6</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.9</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>169.7</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.8</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>181.7</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.5</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>213.9</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>1.1</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>220.9</td><td>-41.6</td><td>14.9</td><td>[-39.7, -1.3]</td><td>0/1</td><td>0.4</td><td>False</td></tr>
+<tr><td>#93312 worker/worker</td><td>233.9</td><td>-41.6</td><td>14.9</td><td>[54.1, 9.9]</td><td>0/77</td><td>0.2</td><td>False</td></tr>
+<tr><td>#85956 mage/feeder</td><td>33.1</td><td>-42.9</td><td>-13.6</td><td>[-42.5, -13.9]</td><td>1/1</td><td>0.0</td><td>False</td></tr>
+<tr><td>#85956 mage/feeder</td><td>97.4</td><td>-42.7</td><td>-13.4</td><td>[-42.5, -13.9]</td><td>1/1</td><td>0.0</td><td>False</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>176.7</td><td>-58.5</td><td>-2.7</td><td>[59.7, -2.7]</td><td>0/87</td><td>0.2</td><td>False</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>181.7</td><td>-58.5</td><td>-2.7</td><td>[59.7, -2.7]</td><td>0/87</td><td>0.2</td><td>False</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>213.9</td><td>-58.5</td><td>-2.7</td><td>[59.7, -2.7]</td><td>0/87</td><td>0.6</td><td>False</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>220.9</td><td>-58.5</td><td>-2.7</td><td>[59.7, -2.7]</td><td>0/87</td><td>0.3</td><td>False</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>233.9</td><td>-58.5</td><td>-2.7</td><td>[54.1, 9.9]</td><td>0/86</td><td>0.1</td><td>False</td></tr>
+<tr><td>#89266 mage/feeder</td><td>64.3</td><td>-42.7</td><td>-14.5</td><td>[-42.5, -13.9]</td><td>1/1</td><td>0.0</td><td>False</td></tr>
+<tr><td>#67995 worker/worker</td><td>16.1</td><td>-50.4</td><td>15.0</td><td>[-18.7, 21.1]</td><td>0/27</td><td>0.7</td><td>False</td></tr>
+<tr><td>#60639 warrior/rescuer</td><td>67.3</td><td>-52.3</td><td>-4.4</td><td>[-55.1, -9.7]</td><td>0/10</td><td>0.5</td><td>False</td></tr>
+<tr><td>#60639 warrior/rescuer</td><td>82.3</td><td>44.7</td><td>15.0</td><td>[-55.1, -9.7]</td><td>5/10</td><td>1.0</td><td>False</td></tr>
+<tr><td>#79887 ranger/feeder</td><td>9.0</td><td>40.7</td><td>-14.3</td><td>[41.5, -13.9]</td><td>0/0</td><td>0.4</td><td>False</td></tr>
+<tr><td>#79887 ranger/feeder</td><td>15.1</td><td>40.7</td><td>-14.3</td><td>[41.5, -13.9]</td><td>0/0</td><td>0.3</td><td>False</td></tr>
+<tr><td>#79887 ranger/feeder</td><td>22.1</td><td>40.7</td><td>-14.3</td><td>[41.5, -13.9]</td><td>0/0</td><td>1.0</td><td>False</td></tr>
+</table>
+<h2 class='bad'>Idle with no goal <span>14</span></h2>
+<table><tr><th>unit</th><th>t</th><th>x</th><th>z</th></tr>
+<tr><td>#59598 warrior/rescuer</td><td>245.0</td><td>53.9</td><td>9.5</td></tr>
+<tr><td>#78846 ranger/feeder</td><td>12.0</td><td>41.6</td><td>-14.3</td></tr>
+<tr><td>#82156 worker/worker</td><td>33.1</td><td>38.6</td><td>0.0</td></tr>
+<tr><td>#78110 worker/worker</td><td>115.5</td><td>-38.2</td><td>0.5</td></tr>
+<tr><td>#90002 ranger/feeder</td><td>9.0</td><td>-42.1</td><td>-14.3</td></tr>
+<tr><td>#85956 mage/feeder</td><td>13.0</td><td>-42.5</td><td>-13.3</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>50.2</td><td>59.4</td><td>-2.5</td></tr>
+<tr><td>#89266 mage/feeder</td><td>17.1</td><td>-42.9</td><td>-14.2</td></tr>
+<tr><td>#67995 worker/worker</td><td>117.5</td><td>-38.4</td><td>-0.4</td></tr>
+<tr><td>#60639 warrior/rescuer</td><td>21.1</td><td>-39.0</td><td>0.0</td></tr>
+<tr><td>#83197 worker/worker</td><td>37.1</td><td>51.0</td><td>-13.9</td></tr>
+<tr><td>#59903 warrior/rescuer</td><td>235.9</td><td>54.2</td><td>9.9</td></tr>
+<tr><td>#79151 mage/feeder</td><td>21.1</td><td>41.5</td><td>-13.4</td></tr>
+<tr><td>#57880 worker/worker</td><td>40.1</td><td>39.1</td><td>-0.1</td></tr>
+</table>
+<h2 class='bad'>A* found no path <span>9</span></h2>
+<table><tr><th>unit</th><th>samples</th><th>first_t</th><th>x</th><th>z</th><th>wp</th></tr>
+<tr><td>#84179 mage/attacker</td><td>6</td><td>143.6</td><td>58.2</td><td>-31.9</td><td>[-41.4, 0.0]</td></tr>
+<tr><td>#74800 warrior/ally</td><td>6</td><td>232.9</td><td>-48.7</td><td>-26.3</td><td>[54.5, 9.6]</td></tr>
+<tr><td>#78110 worker/worker</td><td>4</td><td>249.0</td><td>-52.9</td><td>38.7</td><td>[52.7, 4.3]</td></tr>
+<tr><td>#70754 warrior/rescuer</td><td>10</td><td>34.1</td><td>-36.3</td><td>-25.9</td><td>[59.7, -2.7]</td></tr>
+<tr><td>#95335 mage/attacker</td><td>21</td><td>117.5</td><td>-53.8</td><td>11.8</td><td>[41.4, 0.0]</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>38</td><td>120.5</td><td>0.5</td><td>-5.5</td><td>[41.4, 0.0]</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>9</td><td>17.1</td><td>-65.8</td><td>-44.1</td><td>[56.2, 0.0]</td></tr>
+<tr><td>#79887 ranger/feeder</td><td>184</td><td>8.0</td><td>40.7</td><td>-14.3</td><td>[41.5, -13.9]</td></tr>
+<tr><td>#54570 ranger/attacker</td><td>10</td><td>200.8</td><td>58.9</td><td>-15.2</td><td>[-41.4, 0.0]</td></tr>
+</table>
+<h2 class='bad'>Oscillating <span>19</span></h2>
+<table><tr><th>unit</th><th>flips</th></tr>
+<tr><td>#59598 warrior/rescuer</td><td>19</td></tr>
+<tr><td>#84179 mage/attacker</td><td>23</td></tr>
+<tr><td>#62908 warrior/attacker</td><td>44</td></tr>
+<tr><td>#82156 worker/worker</td><td>19</td></tr>
+<tr><td>#74800 warrior/ally</td><td>27</td></tr>
+<tr><td>#78110 worker/worker</td><td>17</td></tr>
+<tr><td>#70754 warrior/rescuer</td><td>13</td></tr>
+<tr><td>#90002 ranger/feeder</td><td>39</td></tr>
+<tr><td>#95335 mage/attacker</td><td>10</td></tr>
+<tr><td>#85956 mage/feeder</td><td>28</td></tr>
+<tr><td>#64685 ranger/attacker</td><td>14</td></tr>
+<tr><td>#70018 warrior/rescuer</td><td>15</td></tr>
+<tr><td>#89266 mage/feeder</td><td>28</td></tr>
+<tr><td>#67995 worker/worker</td><td>16</td></tr>
+<tr><td>#85220 mage/attacker</td><td>16</td></tr>
+<tr><td>#63949 warrior/attacker</td><td>31</td></tr>
+<tr><td>#54570 ranger/attacker</td><td>38</td></tr>
+<tr><td>#59903 warrior/rescuer</td><td>15</td></tr>
+<tr><td>#57880 worker/worker</td><td>13</td></tr>
+</table>
+<h2 class='good'>Bodies overlapping <span>0</span></h2>
+<table><tr><th>pair</th><th>samples</th></tr>
+<tr><td colspan='2' class='ok'>none</td></tr>
+</table>
+<h2 class='good'>Height mismatch <span>0</span></h2>
+<table><tr><th>unit</th><th>t</th><th>y</th><th>h</th></tr>
+<tr><td colspan='4' class='ok'>none</td></tr>
+</table>
+<h2 class='bad'>Off the nav grid <span>18</span></h2>
+<table><tr><th>unit</th><th>t</th><th>x</th><th>z</th></tr>
+<tr><td>#59598 warrior/rescuer</td><td>104.4</td><td>-4.3</td><td>-3.6</td></tr>
+<tr><td>#84179 mage/attacker</td><td>9.0</td><td>0.8</td><td>-3.4</td></tr>
+<tr><td>#62908 warrior/attacker</td><td>90.4</td><td>-6.6</td><td>-4.3</td></tr>
+<tr><td>#82156 worker/worker</td><td>11.0</td><td>39.8</td><td>6.6</td></tr>
+<tr><td>#74800 warrior/ally</td><td>10.0</td><td>-1.9</td><td>-3.6</td></tr>
+<tr><td>#99381 mage/feeder</td><td>1.0</td><td>-41.7</td><td>-8.6</td></tr>
+<tr><td>#70754 warrior/rescuer</td><td>238.9</td><td>-41.1</td><td>7.6</td></tr>
+<tr><td>#90002 ranger/feeder</td><td>103.4</td><td>-41.3</td><td>-8.1</td></tr>
+<tr><td>#95335 mage/attacker</td><td>9.0</td><td>-1.4</td><td>-4.1</td></tr>
+<tr><td>#74064 warrior/attacker</td><td>9.0</td><td>-0.1</td><td>-4.2</td></tr>
+<tr><td>#93312 worker/worker</td><td>107.4</td><td>-41.7</td><td>14.9</td></tr>
+<tr><td>#64685 ranger/attacker</td><td>9.0</td><td>-0.7</td><td>-3.6</td></tr>
+<tr><td>#89266 mage/feeder</td><td>132.5</td><td>-41.1</td><td>-13.4</td></tr>
+<tr><td>#67995 worker/worker</td><td>254.0</td><td>-6.7</td><td>-8.1</td></tr>
+<tr><td>#85220 mage/attacker</td><td>52.2</td><td>-5.3</td><td>-3.4</td></tr>
+<tr><td>#63949 warrior/attacker</td><td>33.1</td><td>-4.7</td><td>-3.5</td></tr>
+<tr><td>#75841 mage/feeder</td><td>9.0</td><td>41.5</td><td>-15.2</td></tr>
+<tr><td>#54570 ranger/attacker</td><td>92.4</td><td>-6.4</td><td>-4.0</td></tr>
+</table>
+<h2 class="good">Distance per role <span></span></h2>
+<table><tr><th>role</th><th>units</th><th>walked</th></tr><tr><td>warrior/rescuer</td><td>5</td><td>5419 m</td></tr><tr><td>worker/worker</td><td>6</td><td>2089 m</td></tr><tr><td>ranger/attacker</td><td>2</td><td>1853 m</td></tr><tr><td>mage/attacker</td><td>3</td><td>1743 m</td></tr><tr><td>warrior/attacker</td><td>3</td><td>1554 m</td></tr><tr><td>warrior/ally</td><td>1</td><td>1163 m</td></tr><tr><td>mage/feeder</td><td>5</td><td>1129 m</td></tr><tr><td>ranger/feeder</td><td>3</td><td>587 m</td></tr><tr><td>ranger/ally</td><td>1</td><td>147 m</td></tr><tr><td>worker/idle</td><td>1</td><td>0 m</td></tr></table>

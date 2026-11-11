@@ -22,6 +22,7 @@ var key_team := -1            # which castle's key this is
 var wood := 0                 # building materials, worker only
 var metal := 0
 var gather_t := 0.0
+var idle_t := 0.0
 var repair_t := 0.0
 var key_model: Node3D = null  # the enemy key, held over the head
 var path: Array = []          # A* waypoints, consumed front to back
@@ -250,6 +251,15 @@ func update_unit(dt: float, dir: Vector3, aim: Vector3) -> void:
 		want_yaw = Core.yaw_to(pos, aim)
 	yaw = lerp_angle(yaw, want_yaw, 1.0 - exp(-13.0 * dt))
 	rotation.y = yaw
+	# Safety net: if anything ever leaves a unit standing in water or inside a
+	# wall, walk it out instead of letting it sit there with no valid route.
+	if not Terrain.walkable(pos.x, pos.z) and not airborne:
+		var cell: int = Nav.snap_for(Vector3(pos.x, 0, pos.z), Terrain.h(pos.x, pos.z))
+		if cell >= 0:
+			var c: Vector3 = Nav.centre(cell)
+			var to := Vector3(c.x - pos.x, 0.0, c.z - pos.z)
+			if to.length() > 0.01:
+				pos += to.normalized() * minf(to.length(), 4.0 * dt)
 	if prev_pos == Vector3.ZERO and pos != Vector3.ZERO:
 		prev_pos = pos            # first frame: nothing to revert to yet
 	if not airborne:

@@ -140,7 +140,9 @@ static func walkable(x: float, z: float) -> bool:
 	if on_bridge(x, z):
 		return true
 	if absf(x) < WATER_HALF:
-		return false
+		# bridge decks are elevated; ask the heightfield instead of the footprint
+		# band, or the deck edges read as water and A* refuses to start there
+		return h(x, z) > WATER_Y + 0.30
 	return true
 
 

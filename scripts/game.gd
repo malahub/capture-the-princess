@@ -98,6 +98,12 @@ var pathaudit := false
 var deckaudit := false
 var snaptest := false
 var stuckaudit := false
+var navprobe := false
+var telemetry := ""
+var telemetry_t := 0.0
+var telemetry_file: FileAccess = null
+var spectate := false
+var spectate_lbl: Label = null
 var perf := false
 var perf_acc := {}
 var perf_frames := 0
@@ -142,9 +148,16 @@ func _ready() -> void:
 			start_match(true)
 		elif q.find("autostart=play") >= 0:
 			start_match(false)
+		elif q.find("spectate=1") >= 0:
+			demo = "spectate"
+			start_match(false)
+			_setup_demo()
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if navprobe:
+		_run_navprobe()
 		return
 	if stuckaudit:
 		_run_stuckaudit()
@@ -228,6 +241,36 @@ func _ready() -> void:
 ## crosses never jumps more than a unit can step.
 ## Prints the walkable height around the keep so a deck that bleeds past its
 ## platform shows up as a shape you can look at.
+func _run_navprobe() -> void:
+	start_match(false)
+	var pts := [
+		Vector3(-0.1, 0, -4.0), Vector3(1.9, 0, -3.5), Vector3(0.0, 0, 0.0),
+		Vector3(38.9, 0, 6.5), Vector3(-41.1, 0, -19.6), Vector3(-41.7, 0, -8.6),
+		Vector3(-20.0, 0, -4.0), Vector3(20.0, 0, 4.0),
+	]
+	for p: Vector3 in pts:
+		var i: int = Nav.cell_of(p)
+		print("[HF] NAVPROBE (%.1f, %.1f) cell=%d walkable=%s on_bridge=%s h=%.2f cells=%s" % [
+			p.x, p.z, i, str(Terrain.walkable(p.x, p.z)), str(Terrain.on_bridge(p.x, p.z)),
+			Terrain.h(p.x, p.z), str(Nav.cells[i]) if i >= 0 else "n/a"])
+	for p2: Vector3 in [Vector3(1.9,0,-3.5), Vector3(38.9,0,6.5), Vector3(-41.7,0,-8.6), Vector3(-41.1,0,-19.6)]:
+		for so in solids:
+			var rr: Rect2 = so["r"].grow(0.45)
+			if rr.has_point(Vector2(p2.x, p2.z)):
+				print("[HF] NAVPROBE solid over (%.1f,%.1f): tag='%s' top=%.2f ground=%.2f" % [
+					p2.x, p2.z, String(so.get("tag","")), float(so["top"]), Terrain.h(p2.x, p2.z)])
+	var pairs := [[Vector3(-0.1,0,-4.0), Vector3(-41.4,0,0.0)],
+		[Vector3(1.9,0,-3.5), Vector3(-41.4,0,0.0)],
+		[Vector3(-40,0,0), Vector3(40,0,0)],
+		[Vector3(-40,0,20), Vector3(40,0,-20)]]
+	for pr: Array in pairs:
+		var a: Vector3 = pr[0]
+		var b: Vector3 = pr[1]
+		var path: Array = Nav.find_path(a, b)
+		print("[HF] NAVPROBE path (%.0f,%.0f)->(%.0f,%.0f) = %d waypoints %s" % [a.x, a.z, b.x, b.z, path.size(), "OK" if path.size() > 0 else "EMPTY"])
+	get_tree().quit()
+
+
 ## Runs the match and reports units that spend seconds with a waypoint but no
 ## movement — the "NPCs get stuck" complaint, with the location to look at.
 func _run_stuckaudit() -> void:
@@ -1037,6 +1080,35 @@ func _setup_demo() -> void:
 		# fire a couple of shots once the frame is warm
 		fire_at_frame = 12
 		fire_shot = {"owner": sh, "target": tg.position + Vector3(0, 1.15, 0), "kind": "arrow"}
+	elif demo == "spectate":
+		spectate = true
+		# 10 v 10, all real AI brains, nothing scripted
+		var roles_r := ["rescuer", "feeder", "attacker", "attacker", "worker", "feeder", "attacker", "rescuer", "feeder", "worker"]
+		var classes_r := ["warrior", "ranger", "mage", "warrior", "worker", "mage", "ranger", "warrior", "mage", "worker"]
+		for t in 2:
+			for i in 10:
+				var u := _new_unit(t, String(classes_r[i]), false)
+				place(u, castles[t]["spawn"] + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3)))
+				u.brain = String(roles_r[i])
+				units.append(u)
+		# the "player" is a spectator: park them off-field and hide them
+		player.alive = false
+		player.visible = false
+		zoom = 128.0
+		zoom_target = 128.0
+		cam_focus = Vector3.ZERO
+		spectate_lbl = Label.new()
+		spectate_lbl.position = Vector2(0, 80)
+		var fnt: Font = ThemeDB.fallback_font
+		spectate_lbl.add_theme_font_override("font", fnt)
+		spectate_lbl.add_theme_font_size_override("font_size", 26)
+		spectate_lbl.size = Vector2(1600, 34)
+		spectate_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		spectate_lbl.add_theme_color_override("font_color", Core.GOLD)
+		ui.add_child(spectate_lbl)
+		if telemetry != "":
+			telemetry_file = FileAccess.open(telemetry, FileAccess.WRITE)
+			print("[HF] SPECTATE telemetry -> %s" % telemetry)
 	elif demo == "staircheck":
 		player.pos = Vector3(-(Bld.BACK_X - 8.0 + Bld.CASTLE_SHIFT), 0.0, 7.0)
 		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
@@ -1249,6 +1321,10 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a.begins_with("--telemetry="):
+			telemetry = a.substr(12)
+		elif a == "--navprobe":
+			navprobe = true
 		elif a == "--stuckaudit":
 			stuckaudit = true
 		elif a == "--snaptest":
@@ -1746,6 +1822,14 @@ func _step(dt: float) -> void:
 		if u == player:
 			continue
 		var t2 := Time.get_ticks_usec() if perf else 0
+		if not u.has_waypoint and u.target_unit == null:
+			u.idle_t += dt
+			if u.idle_t > 3.0:
+				u.idle_t = 0.0
+				u.waypoint = gates[1 - u.team]["pos"]
+				u.has_waypoint = true
+		else:
+			u.idle_t = 0.0
 		var dir := _ai_dir(u, dt)
 		t2 = _pt("  ai_nav", t2)
 		var aim := u.target_unit.pos if (u.target_unit != null and is_instance_valid(u.target_unit)) else u.waypoint
@@ -1774,6 +1858,18 @@ func _step(dt: float) -> void:
 	_update_silhouettes(dt)
 	t = _pt("silhouettes", t)
 	_maybe_fire_demo()
+	_write_telemetry(dt)
+	if spectate and spectate_lbl != null:
+		var ra := 0
+		var ba := 0
+		for u: Unit in units:
+			if u.team == 0 and u.alive:
+				ra += 1
+			elif u.team == 1 and u.alive:
+				ba += 1
+		spectate_lbl.text = "SPECTATING · RED %d · BLUE %d · GATES %d%% / %d%%" % [
+			ra, ba, int(100.0 * float(gates[0]["hp"]) / float(gates[0]["max"])),
+			int(100.0 * float(gates[1]["hp"]) / float(gates[1]["max"]))]
 	_update_interaction_label()
 	if state == S_TUTORIAL:
 		_update_tutorial(dt)
@@ -2127,6 +2223,11 @@ func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
 		return false
 	var h1 := Terrain.h(p.x, p.z)
 	if h1 - from_h > Terrain.STEP_UP:
+		return false
+	# No walking off a ledge. The river is 6 m below the bridge deck and there was
+	# no downward check, so a unit nudged at the bridge lip stepped into the water
+	# and then had no legal route out of a cell A* refuses to start from.
+	if from_h - h1 > 2.45:
 		return false                                # too high to climb
 	if from_h - h1 > Terrain.STEP_DOWN:
 		return false                                # do not walk off the parapet
@@ -3204,16 +3305,17 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 
 	var flat := Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z)
 	if flat.length() < 0.5:
+		u.has_waypoint = false      # arrived: let the brain pick the next job
 		return Vector3.ZERO
 
 	# A goal inside a wall (or on top of one) is not something to walk into:
 	# resolve it to the closest cell at the unit's own level first. This is what
 	# kept a handful of soldiers leaning on a castle wall for the whole match.
-	if flat.length() > 2.0:
+	if true:
 		var reach_cell: int = Nav.snap_for(goal, Terrain.h(u.pos.x, u.pos.z))
 		if reach_cell >= 0:
 			var near := Nav.centre(reach_cell)
-			if near.distance_to(goal) < 7.0:
+			if near.distance_to(goal) < 7.0 and near.distance_to(u.pos) > 0.35:
 				goal = near
 				if not chasing:
 					u.waypoint = near    # stop re-targeting the unreachable point
@@ -3270,6 +3372,21 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 		break
 	if u.path_i >= u.path.size():
 		target = goal
+
+	# A target standing on the keep ledge is 2.15 m up and there is no route to
+	# it, so a chaser used to press into the platform for the rest of the match.
+	# Hold at standoff range instead: still a threat, no longer a pile of bodies
+	# jammed against a wall.
+	if chasing and is_instance_valid(u.target_unit):
+		var th: float = Terrain.h(u.target_unit.pos.x, u.target_unit.pos.z)
+		var uh: float = Terrain.h(u.pos.x, u.pos.z)
+		if absf(th - uh) > Terrain.STEP_UP:
+			var gap: float = u.pos.distance_to(u.target_unit.pos)
+			if gap < 3.2:
+				return Vector3.ZERO
+			var away := Vector3(u.pos.x - u.target_unit.pos.x, 0.0, u.pos.z - u.target_unit.pos.z)
+			if away.length() > 0.01:
+				return away.normalized()      # back off to firing range
 
 	var d2 := Vector3(target.x - u.pos.x, 0.0, target.z - u.pos.z)
 	if d2.length() < 0.15:
@@ -3591,6 +3708,35 @@ func _maybe_fire_demo() -> void:
 		fire_shot = {}
 
 
+## Telemetry: one JSON line per unit per second. Everything that could go wrong
+## (stuck, no goal, path failure, gate loitering, overlap) is derivable here, and
+## tools/analyze_telemetry.py turns it into a report.
+func _write_telemetry(dt: float) -> void:
+	if telemetry_file == null:
+		return
+	telemetry_t += dt
+	if telemetry_t < 1.0:
+		return
+	telemetry_t = 0.0
+	var t := snappedf(match_time, 0.1)
+	for u: Unit in units:
+		if not is_instance_valid(u):
+			continue
+		var gh := Terrain.h(u.pos.x, u.pos.z)
+		var line := {
+			"t": t, "id": u.get_instance_id() % 100000, "team": u.team, "cls": u.cls,
+			"brain": u.brain, "x": snappedf(u.pos.x, 0.1), "z": snappedf(u.pos.z, 0.1),
+			"y": snappedf(u.position.y, 0.1), "h": snappedf(gh, 0.1),
+			"alive": u.alive, "hp": int(u.hp), "vel": snappedf(u.vel.length(), 0.1),
+			"wp": [snappedf(u.waypoint.x, 0.1), snappedf(u.waypoint.z, 0.1)], "has_wp": u.has_waypoint,
+			"path": u.path.size(), "pi": u.path_i, "stuck": snappedf(u.stuck_t, 0.1),
+			"tgt": u.target_unit != null, "carry": u.carrying != null, "key": u.has_key,
+			"cake": u.cake, "in_nav": Nav.cell_of(u.pos) >= 0 and Nav.cells.size() > 0 and Nav.cells[Nav.cell_of(u.pos)] == 1,
+		}
+		telemetry_file.store_line(JSON.stringify(line))
+	telemetry_file.flush()
+
+
 func _update_camera(dt: float) -> void:
 	zoom = Core.damp(zoom, zoom_target, 8.0, dt)
 	camera.size = zoom
@@ -3606,7 +3752,11 @@ func _update_camera(dt: float) -> void:
 	var focus2 := cam_focus
 	if player != null and is_instance_valid(player) and demo == "":
 		focus2 = player.position
-	if demo != "":
+	if demo == "spectate":
+		focus2 = Vector3.ZERO
+		zoom = 128.0
+		cam_focus = Vector3.ZERO
+	elif demo != "":
 		# demo shots own the camera: the match setup resets it otherwise
 		focus2 = demo_focus
 		zoom = demo_zoom
