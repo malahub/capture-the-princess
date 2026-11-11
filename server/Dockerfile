@@ -1,5 +1,5 @@
 # Capture The Princess — room relay (WebSocket, 20 Hz, 100 players/room).
-FROM node:22.23.4-alpine
+FROM 127.0.0.1:5050/node:22.23.5-alpine
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080
 COPY package.json package-lock.json* ./
