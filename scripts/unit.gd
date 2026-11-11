@@ -29,6 +29,7 @@ var path_i := 0
 var path_goal := Vector3.ZERO
 var path_t := 0.0             # seconds until a replan is allowed
 var path_goal_cell := -1
+var prev_pos := Vector3.ZERO
 var vy := 0.0                 # vertical velocity while jumping
 var airborne := false
 var carrying: Princess = null
@@ -249,6 +250,16 @@ func update_unit(dt: float, dir: Vector3, aim: Vector3) -> void:
 		want_yaw = Core.yaw_to(pos, aim)
 	yaw = lerp_angle(yaw, want_yaw, 1.0 - exp(-13.0 * dt))
 	rotation.y = yaw
+	if prev_pos == Vector3.ZERO and pos != Vector3.ZERO:
+		prev_pos = pos            # first frame: nothing to revert to yet
+	if not airborne:
+		# a crowd shove can put a unit inside a wall or platform footprint; the
+		# step rules never allowed that, so refuse the displacement instead of
+		# teleporting up 2 m
+		var gh: float = Terrain.h(pos.x, pos.z)
+		if absf(gh - position.y) > Terrain.STEP_UP + 0.55:
+			pos = prev_pos
+	prev_pos = pos
 	if airborne:
 		vy -= 24.0 * dt
 		var ground := Terrain.h(pos.x, pos.z)
@@ -269,11 +280,15 @@ func update_unit(dt: float, dir: Vector3, aim: Vector3) -> void:
 ## which reads as the character being cut in half.
 func _stand_h(px: float, pz: float) -> float:
 	const R := 0.34
-	var h := Terrain.h(px, pz)
-	h = maxf(h, Terrain.h(px + R, pz))
-	h = maxf(h, Terrain.h(px - R, pz))
-	h = maxf(h, Terrain.h(px, pz + R))
-	h = maxf(h, Terrain.h(px, pz - R))
+	var h0 := Terrain.h(px, pz)
+	var h := h0
+	# Only count neighbours that belong to the same walkable surface. Taking a
+	# plain max lifted anyone standing next to the 2.15 m keep platform onto it,
+	# which is why walking past the shrine teleported you up a storey.
+	for off in [Vector2(R, 0), Vector2(-R, 0), Vector2(0, R), Vector2(0, -R)]:
+		var hh: float = Terrain.h(px + off.x, pz + off.y)
+		if hh <= h0 + Terrain.STEP_UP:
+			h = maxf(h, hh)
 	return h
 
 

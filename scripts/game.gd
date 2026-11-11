@@ -95,6 +95,8 @@ var nettest := false
 var keyflow := false
 var shottest := false
 var pathaudit := false
+var deckaudit := false
+var snaptest := false
 var perf := false
 var perf_acc := {}
 var perf_frames := 0
@@ -142,6 +144,12 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if snaptest:
+		_run_snaptest()
+		return
+	if deckaudit:
+		_run_deckaudit()
 		return
 	if pathaudit:
 		_run_pathaudit()
@@ -214,6 +222,63 @@ func _ready() -> void:
 
 ## Walks the nav graph to every height in the game and checks the surface it
 ## crosses never jumps more than a unit can step.
+## Prints the walkable height around the keep so a deck that bleeds past its
+## platform shows up as a shape you can look at.
+## A crowd pressed against the keep must not get shoved onto its 2.15 m ledge.
+func _run_snaptest() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var kp: Vector3 = castles[0]["key_pos"]
+	var base_h: float = Terrain.PLATEAU_H
+	var crowd: Array = []
+	for i in 9:
+		var u := _new_unit(0, "villager", false)
+		place(u, Vector3(kp.x - 3.6 + float(i % 3) * 0.3, 0.0, kp.z - 0.8 + float(i / 3) * 0.3))
+		u.brain = "none"
+		units.append(u)
+		crowd.append(u)
+	var worst := -99.0
+	for step in 240:
+		for u2: Unit in crowd:
+			var toward := Vector3(kp.x - u2.pos.x, 0.0, kp.z - u2.pos.z).normalized()
+			u2.update_unit(dt, toward, Vector3.ZERO)
+		separate_units()
+		for u3: Unit in crowd:
+			worst = maxf(worst, u3.position.y - base_h)
+	var ok: bool = worst <= Terrain.STEP_UP + 0.06
+	print("[HF] SNAPTEST crowd=%d max_rise_above_courtyard=%.2f m (limit %.2f)  %s" % [
+		crowd.size(), worst, Terrain.STEP_UP, "PASS" if ok else "FAIL"])
+	for u4: Unit in crowd:
+		print("[HF]   y=%.2f h=%.2f at (%.1f,%.1f)" % [u4.position.y, Terrain.h(u4.pos.x, u4.pos.z), u4.pos.x, u4.pos.z])
+	get_tree().quit()
+
+
+func _run_deckaudit() -> void:
+	start_match(false)
+	var c: Vector3 = castles[0]["court"]
+	var cx: float = c.x
+	var cz: float = c.z
+	print("[HF] DECK around keep centre (%.1f, %.1f), plateau %.2f" % [cx, cz, Terrain.PLATEAU_H])
+	for iz in range(-8, 9):
+		var row := ""
+		for ix in range(-8, 9):
+			var x := cx + float(ix) * 1.0
+			var z := cz + float(iz) * 1.0
+			var hh: float = Terrain.h(x, z) - Terrain.PLATEAU_H
+			if hh < 0.05:
+				row += " ."
+			elif hh < 0.8:
+				row += " 1"
+			elif hh < 1.6:
+				row += " 2"
+			elif hh < 2.5:
+				row += " 3"
+			else:
+				row += " #"
+		print("[HF]   " + row)
+	get_tree().quit()
+
+
 func _run_pathaudit() -> void:
 	start_match(false)
 	var walkable := 0
@@ -928,6 +993,17 @@ func _setup_demo() -> void:
 		# fire a couple of shots once the frame is warm
 		fire_at_frame = 12
 		fire_shot = {"owner": sh, "target": tg.position + Vector3(0, 1.15, 0), "kind": "arrow"}
+	elif demo == "keyprompt":
+		# clear the field so the shot is about the prompt, not a fight
+		for u5 in units.duplicate():
+			if u5 != player and u5.team == 1:
+				units.erase(u5)
+				u5.queue_free()
+		var kb3: Dictionary = keys[1]
+		place(player, Vector3(kb3["home"].x + 2.2, 0.0, kb3["home"].z))
+		zoom = 20.0
+		zoom_target = 20.0
+		cam_focus = player.pos + Vector3(0, 2.6, 0)
 	elif demo == "keycarry":
 		var kb: Dictionary = keys[1]
 		place(player, Vector3(kb["home"].x + 1.0, 0.0, kb["home"].z))
@@ -1123,6 +1199,10 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--snaptest":
+			snaptest = true
+		elif a == "--deckaudit":
+			deckaudit = true
 		elif a == "--perf":
 			perf = true
 		elif a == "--pathaudit":
@@ -1220,9 +1300,11 @@ func play_sfx(stream: AudioStream, db: float = -9.0) -> void:
 
 
 func _make_world_labels() -> void:
-	near_lbl = Core.label3d(self, "", Vector3.ZERO, 40, Color("ffd766"))
+	near_lbl = Core.label3d(self, "", Vector3.ZERO, 34, Color("ffd766"))
 	near_lbl.fixed_size = true
-	near_lbl.pixel_size = 0.019
+	# fixed_size scales by pixel_size: 0.016 (the world-space default) made this
+	# a screen-filling banner, so it gets its own tiny value
+	near_lbl.pixel_size = 0.00115
 	near_lbl.no_depth_test = true
 	near_lbl.visible = false
 	hint_lbl = Core.label3d(self, "", Vector3.ZERO, 40, Color(0.9, 0.95, 1.0, 0.85))
@@ -2034,8 +2116,13 @@ func separate_units() -> void:
 			var dist := d.length()
 			if dist > 0.001 and dist < 0.9:
 				var push := d / dist * (0.9 - dist) * 0.5
-				a.pos -= push
-				b.pos += push
+				# never shove someone onto a ledge they cannot climb
+				var na := a.pos - push
+				if absf(Terrain.h(na.x, na.z) - Terrain.h(a.pos.x, a.pos.z)) <= Terrain.STEP_UP:
+					a.pos = na
+				var nb := b.pos + push
+				if absf(Terrain.h(nb.x, nb.z) - Terrain.h(b.pos.x, b.pos.z)) <= Terrain.STEP_UP:
+					b.pos = nb
 
 
 func _update_carry_helpers() -> void:
