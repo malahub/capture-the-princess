@@ -95,6 +95,11 @@ var nettest := false
 var keyflow := false
 var shottest := false
 var pathaudit := false
+var perf := false
+var perf_acc := {}
+var perf_frames := 0
+var perf_frame_us := 0
+var perf_max_us := 0
 var fire_at_frame := -1
 var fire_shot: Dictionary = {}
 var showsil := false
@@ -119,6 +124,9 @@ func _ready() -> void:
 	Bld.scatter(world)
 	castles[0] = Bld.castle(world, 0, solids)
 	castles[1] = Bld.castle(world, 1, solids)
+	# the map never changes between matches, so the grid is built once here
+	# rather than at every kickoff (it costs ~0.6 s)
+	Nav.build(solids)
 	_make_camera()
 	_make_ui()
 	_make_audio()
@@ -1115,6 +1123,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--perf":
+			perf = true
 		elif a == "--pathaudit":
 			pathaudit = true
 		elif a == "--shottest":
@@ -1314,7 +1324,8 @@ func start_match(is_tutorial: bool) -> void:
 			place(r, castles[0]["spawn"] + Vector3(float(i) * 1.8, 0, -1.4 - float(i) * 0.6))
 			r.brain = ally_brains[i]
 			units.append(r)
-	Nav.build(solids)
+	if not Nav.built:
+		Nav.build(solids)
 	cam_focus = player.pos
 	camera.size = zoom
 	ui.ui_guard = 0.5
@@ -1460,6 +1471,7 @@ func _add_cake_pile(pos: Vector3, count: int) -> void:
 
 # ================================================================ loop
 func _process(dt: float) -> void:
+	var frame_t0 := Time.get_ticks_usec() if perf else 0
 	frame_count += 1
 	if demo == "shots" and frame_count == 20:
 		for u: Unit in units:
@@ -1505,6 +1517,17 @@ func _process(dt: float) -> void:
 
 	if state == S_PLAY or state == S_TUTORIAL:
 		_step(dt)
+		if perf:
+			var us := Time.get_ticks_usec() - frame_t0
+			perf_frame_us += us
+			perf_max_us = maxi(perf_max_us, us)
+			if us > 30000:
+				var parts := []
+				for k in perf_frame_labels.keys():
+					parts.append("%s=%.1f" % [k, float(perf_frame_labels[k]) / 1000.0])
+				print("[HF] SPIKE frame=%d %.1f ms  %s" % [frame_count, float(us) / 1000.0, " ".join(parts)])
+			if perf_frames >= 600:
+				_perf_report()
 	elif state == S_MENU:
 		for u: Unit in units:
 			if is_instance_valid(u) and u.alive:
@@ -1534,6 +1557,39 @@ func _animate_props(dt: float) -> void:
 		blue_princess.update_princess(dt)
 
 
+## Profiler: every block in _step records how long it took, and the run prints a
+## mean-ms-per-frame table. Cheap enough to leave in (it is a no-op unless --perf).
+var perf_frame_labels := {}
+var nav_budget := 2          # A* searches allowed per frame: one long path is
+                             # ~4 ms, so ten of them at once was a 50 ms hitch
+
+
+func _pt(label: String, since: int) -> int:
+	if not perf:
+		return 0
+	var now := Time.get_ticks_usec()
+	var d := now - since
+	perf_acc[label] = float(perf_acc.get(label, 0.0)) + float(d)
+	perf_frame_labels[label] = float(perf_frame_labels.get(label, 0.0)) + float(d)
+	return now
+
+
+func _perf_report() -> void:
+	if not perf or perf_frames == 0:
+		return
+	var rows := []
+	for k in perf_acc.keys():
+		rows.append([String(k), float(perf_acc[k]) / float(perf_frames) / 1000.0])
+	rows.sort_custom(func(a, b): return a[1] > b[1])
+	var total := float(perf_frame_us) / float(perf_frames) / 1000.0
+	print("[HF] PERF frames=%d  frame mean=%.2f ms  worst=%.2f ms  (~%.0f fps)" % [
+		perf_frames, total, float(perf_max_us) / 1000.0, 1000.0 / maxf(total, 0.01)])
+	for r in rows:
+		if r[1] >= 0.01:
+			print("[HF]   %-22s %6.2f ms  %5.1f%%" % [r[0], r[1], 100.0 * r[1] / maxf(total, 0.01)])
+	get_tree().quit()
+
+
 func _step(dt: float) -> void:
 	if demo == "world":
 		return
@@ -1542,24 +1598,37 @@ func _step(dt: float) -> void:
 		_update_projectiles(dt)
 		_update_fx(dt)
 		return
+	perf_frame_labels.clear()
+	nav_budget = 2
 	match_time += dt
+	var t := Time.get_ticks_usec() if perf else 0
 	_handle_player(dt)
+	t = _pt("player", t)
 	_update_ai(dt)
+	t = _pt("ai_think", t)
 	for u: Unit in units:
 		if not is_instance_valid(u) or not u.alive:
 			continue
 		if u == player:
 			continue
+		var t2 := Time.get_ticks_usec() if perf else 0
 		var dir := _ai_dir(u, dt)
+		t2 = _pt("  ai_nav", t2)
 		var aim := u.target_unit.pos if (u.target_unit != null and is_instance_valid(u.target_unit)) else u.waypoint
 		u.update_unit(dt, dir, aim)
 		_auto_attack(u, aim)
+		_pt("  unit_update", t2)
+	t = _pt("units_total", t)
 	separate_units()
+	t = _pt("separate", t)
 	_update_home_heal(dt)
 	_update_carry_helpers()
+	t = _pt("helpers", t)
 	_update_projectiles(dt)
+	t = _pt("projectiles", t)
 	_update_throws(dt)
 	_update_gates(dt)
+	t = _pt("gates", t)
 	_update_stations(dt)
 	_update_keys(dt)
 	_update_resources(dt)
@@ -1567,7 +1636,9 @@ func _step(dt: float) -> void:
 	_update_cakes(dt)
 	_update_respawns(dt)
 	_update_dropped_hats(dt)
+	t = _pt("world_systems", t)
 	_update_silhouettes(dt)
+	t = _pt("silhouettes", t)
 	_maybe_fire_demo()
 	_update_interaction_label()
 	if state == S_TUTORIAL:
@@ -1576,6 +1647,7 @@ func _step(dt: float) -> void:
 		_update_sudden_death()
 		_update_holds(dt)
 	_check_end()
+	perf_frames += 1
 
 
 func _handle_player(dt: float) -> void:
@@ -2998,14 +3070,27 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	u.path_t -= dt
 	# replan when the path is empty, the goal moved, or the cooldown lapsed
 	var stale: bool = u.path.is_empty() or u.path_i >= u.path.size()
-	var moved: bool = u.path_goal.distance_to(goal) > 2.6
-	# the cooldown gates the replan: a chasing unit's goal moves every frame, and
-	# replanning on that alone stalls the whole match
-	if u.path_t <= 0.0 and (stale or moved):
-		u.path = Nav.find_path(u.pos, goal)
-		u.path_i = 0
-		u.path_goal = goal
-		u.path_t = 0.6 + randf() * 0.5      # stagger so 100 units don't replan together
+	var moved: bool = u.path_goal.distance_to(goal) > 4.0
+	var goal_cell: int = Nav.cell_of(goal)
+	# A chase moves its goal every frame, but if it is still in the same nav cell
+	# the path is still right: replanning on "moved" alone was the remaining cost.
+	var same_cell: bool = goal_cell == u.path_goal_cell and not u.path.is_empty() and u.path_i < u.path.size()
+	if u.path_t <= 0.0 and not same_cell and (stale or moved):
+		if nav_budget > 0:
+			nav_budget -= 1
+			u.path = Nav.find_path(u.pos, goal)
+			u.path_i = 0
+			u.path_goal = goal
+			u.path_goal_cell = goal_cell
+			# a failed search is expensive and won't improve next frame: wait longer
+			u.path_t = (1.2 + randf() * 0.8) if Nav.last_found else (2.5 + randf() * 1.5)
+			if perf and Nav.last_expansions > 1500:
+				print("[HF] NAV heavy: %d expansions found=%s" % [Nav.last_expansions, str(Nav.last_found)])
+		else:
+			# over budget this frame: keep walking the old path, try again shortly
+			u.path_t = 0.05 + randf() * 0.1
+			if u.path.is_empty():
+				return flat.normalized()
 		if u.path.is_empty() and not Nav.built:
 			return flat.normalized()        # nav unavailable: straight line fallback
 
@@ -3272,19 +3357,31 @@ func _update_interaction_label() -> void:
 ## courtyard is hidden by the wall it stands behind.
 func _is_occluded(target: Vector3) -> bool:
 	var dir := cam_dir.normalized()
-	# 34 samples over 34 m is ~1 m apart: a 2.6 m wall can never slip between them
-	var steps := 34
 	var dist := 34.0
 	var start := target + dir * dist
-	for k in range(1, steps):
-		var t := float(k) / float(steps)
+	# terrain first, coarsely: hills are wide, walls are handled below
+	for k in range(1, 18):
+		var t := float(k) / 18.0
 		var p: Vector3 = start.lerp(target, t)
 		if Terrain.h(p.x, p.z) > p.y + 0.05:
 			return true
-		var flat := Vector2(p.x, p.z)
-		for s in solids:
-			var rr: Rect2 = s["r"]
-			if p.y < float(s["top"]) and rr.has_point(flat):
+	# solids: one pass over the rectangles that can touch this sight line. The
+	# old version looped every solid inside every sample: 34 x ~200 per unit,
+	# per check, twice per unit, twenty times a second.
+	var lo := Vector2(minf(start.x, target.x), minf(start.z, target.z))
+	var hi := Vector2(maxf(start.x, target.x), maxf(start.z, target.z))
+	var box := Rect2(lo, hi - lo)
+	for s in solids:
+		var rr: Rect2 = s["r"]
+		if not rr.intersects(box):
+			continue
+		var top: float = float(s["top"])
+		if top < target.y - 1.2:
+			continue
+		for i in 6:
+			var t2 := float(i) / 5.0
+			var p2: Vector3 = start.lerp(target, t2)
+			if p2.y < top and rr.has_point(Vector2(p2.x, p2.z)):
 				return true
 	return false
 
@@ -3303,7 +3400,7 @@ var occ_t := 0.0
 
 func _update_silhouettes(dt: float) -> void:
 	occ_t += dt
-	if occ_t < 0.05:
+	if occ_t < 0.10:
 		return
 	occ_t = 0.0
 	for u: Unit in units:
@@ -3424,6 +3521,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_skip_tutorial_step()
 		else:
 			ui.help.visible = not ui.help.visible
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_F3:
+		ui.fps_on = not ui.fps_on
 		return
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_R:
 		cam_yaw_target = fposmod(cam_yaw_target + PI * 0.5, TAU)

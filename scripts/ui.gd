@@ -507,6 +507,9 @@ func _build_hud() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(hud)
 
+	fps_label = mk_label(hud, "", 15, Color(0.75, 0.95, 0.75), Vector2(24, 156), 320, 22)
+	fps_label.visible = false
+
 	# edge arrow for a key that is off screen
 	key_arrow = KeyArrow.new()
 	key_arrow.game = game
@@ -559,6 +562,12 @@ func _build_hud() -> void:
 func update_hud(d: Dictionary) -> void:
 	if not hud.visible:
 		return
+	if fps_on and fps_label != null:
+		fps_label.visible = true
+		fps_label.text = "FPS %d   ~%.1f ms   units %d" % [
+			Engine.get_frames_per_second(),
+			1000.0 / maxf(Engine.get_frames_per_second(), 1.0),
+			(game.units.size() if game != null else 0)]
 	if key_arrow != null:
 		key_arrow.queue_redraw()
 	if map_view != null:
@@ -766,6 +775,8 @@ func show_menu() -> void:
 
 
 var key_arrow: KeyArrow = null
+var fps_label: Label = null
+var fps_on := false
 
 
 func show_hud() -> void:

@@ -665,10 +665,10 @@ static func remote_ghost(parent: Node3D, team: int, cls: String) -> Node3D:
 			Core.cyl(marker, 0.02, 0.28, 0.40, Vector3(0, 0.1, 0), Core.PURPLE, Vector3.ZERO, 8)
 		_:
 			Core.cyl(marker, 0.26, 0.28, 0.10, Vector3.ZERO, Core.WOOD, Vector3.ZERO, 8)
-	var tag := Core.label3d(n, "P", Vector3(0, 2.35, 0), 40, col.lightened(0.35))
+	var tag := Core.label3d(n, "P", Vector3(0, 2.35, 0), 34, col.lightened(0.35))
 	tag.name = "Tag"
 	tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	tag.no_depth_test = true
+	tag.visible = false          # shown only for near peers, by Net
 	return n
 
 

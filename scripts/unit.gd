@@ -28,6 +28,7 @@ var path: Array = []          # A* waypoints, consumed front to back
 var path_i := 0
 var path_goal := Vector3.ZERO
 var path_t := 0.0             # seconds until a replan is allowed
+var path_goal_cell := -1
 var vy := 0.0                 # vertical velocity while jumping
 var airborne := false
 var carrying: Princess = null

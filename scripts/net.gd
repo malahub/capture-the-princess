@@ -193,6 +193,11 @@ func _lerp_peers(dt: float) -> void:
 		var nxt := Vector3(lerpf(cur.x, t.x, k), Terrain.h(t.x, t.z), lerpf(cur.z, t.z, k))
 		n.position = nxt
 		n.rotation.y = lerp_angle(n.rotation.y, float(e["yaw"]), k)
+		# a hundred billboard labels is a hundred extra draws: only show the tag
+		# for peers you could actually read it on
+		var tag: Node = n.get_node_or_null("Tag")
+		if tag != null and game != null and game.player != null:
+			tag.visible = n.position.distance_to(game.player.position) < 26.0
 
 
 func _class_name(idx: int) -> String:

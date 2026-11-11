@@ -8,28 +8,16 @@ extends RefCounted
 ## grid once per match, and searches it with the same step rule the movement code
 ## uses, so a stair the unit can't climb is an edge that doesn't exist either.
 
-const CELL := 1.2
+const CELL := 1.4
 
 static var w := 0
 static var h := 0
 static var cells := PackedByteArray()      # 1 = walkable
+static var links := PackedByteArray()      # per cell: bitmask of legal directions
 static var heights := PackedFloat32Array() # surface height at the cell centre
 static var built := false
-
-
-static func _walkable(x: float, z: float, sol: Array) -> bool:
-	if absf(x) > Terrain.HALF_X - 1.0 or absf(z) > Terrain.HALF_Z - 1.0:
-		return false
-	if not Terrain.walkable(x, z):
-		return false
-	for s in sol:
-		var tag: String = String(s.get("tag", ""))
-		if tag.begins_with("gate"):
-			continue                     # the gate is a door: the path goes through it
-		var rr: Rect2 = s["r"]
-		if rr.has_point(Vector2(x, z)) and float(s["top"]) > Terrain.h(x, z) + 0.25:
-			return false
-	return true
+static var last_expansions := 0
+static var last_found := false
 
 
 static func build(sol: Array) -> void:
@@ -39,13 +27,63 @@ static func build(sol: Array) -> void:
 	cells.resize(w * h)
 	heights = PackedFloat32Array()
 	heights.resize(w * h)
+
+	# 1. terrain only. One Terrain.h per cell, no solids in the loop.
 	for iz in h:
 		for ix in w:
 			var x := -Terrain.HALF_X + (float(ix) + 0.5) * CELL
 			var z := -Terrain.HALF_Z + (float(iz) + 0.5) * CELL
 			var i := iz * w + ix
 			heights[i] = Terrain.h(x, z)
-			cells[i] = 1 if _walkable(x, z, sol) else 0
+			cells[i] = 1 if Terrain.walkable(x, z) else 0
+
+	# 2. rasterise the solids instead of asking every cell about every solid.
+	#    (The old way was cells x solids = ~2M rect tests and a 5 s freeze.)
+	for s in sol:
+		var tag: String = String(s.get("tag", ""))
+		if tag.begins_with("gate"):
+			continue                       # the gate is a door, not a wall
+		var rr: Rect2 = s["r"]
+		var top: float = float(s["top"])
+		var ix0: int = clampi(int((rr.position.x + Terrain.HALF_X) / CELL), 0, w - 1)
+		var ix1: int = clampi(int((rr.position.x + rr.size.x + Terrain.HALF_X) / CELL), 0, w - 1)
+		var iz0: int = clampi(int((rr.position.y + Terrain.HALF_Z) / CELL), 0, h - 1)
+		var iz1: int = clampi(int((rr.position.y + rr.size.y + Terrain.HALF_Z) / CELL), 0, h - 1)
+		for iz2 in range(iz0, iz1 + 1):
+			for ix2 in range(ix0, ix1 + 1):
+				var i2 := iz2 * w + ix2
+				var x2 := -Terrain.HALF_X + (float(ix2) + 0.5) * CELL
+				var z2 := -Terrain.HALF_Z + (float(iz2) + 0.5) * CELL
+				if rr.has_point(Vector2(x2, z2)) and top > heights[i2] + 0.25:
+					cells[i2] = 0
+
+	# 3. edges, with the leg sampled only where the height actually changes
+	links = PackedByteArray()
+	links.resize(w * h)
+	links.fill(0)
+	for iz in h:
+		for ix in w:
+			var i := iz * w + ix
+			if cells[i] != 1:
+				continue
+			var mask := 0
+			for dz: int in [-1, 0, 1]:
+				for dx: int in [-1, 0, 1]:
+					if dx == 0 and dz == 0:
+						continue
+					var nx: int = ix + dx
+					var nz: int = iz + dz
+					if nx < 0 or nz < 0 or nx >= w or nz >= h:
+						continue
+					var ni: int = nz * w + nx
+					if cells[ni] != 1:
+						continue
+					if dx != 0 and dz != 0:
+						if cells[iz * w + nx] != 1 or cells[nz * w + ix] != 1:
+							continue
+					if absf(heights[ni] - heights[i]) <= 0.35 or _leg_ok(centre(i), centre(ni)):
+						mask |= 1 << ((dz + 1) * 3 + (dx + 1))
+			links[i] = mask
 	built = true
 
 
@@ -89,12 +127,14 @@ static func snap(p: Vector3) -> int:
 static func _step_ok(a: int, b: int) -> bool:
 	if cells[b] != 1:
 		return false
+	return true
+
+
+static func _leg_ok(pa: Vector3, pb: Vector3) -> bool:
 	# Sample the leg rather than comparing cell centres: a stair tread is
 	# shallower than a cell is wide, so centre-to-centre heights lie about it.
-	var pa := centre(a)
-	var pb := centre(b)
 	var dist := pa.distance_to(pb)
-	var steps := maxi(1, int(dist / 0.25))
+	var steps := maxi(1, int(dist / 0.5))
 	var prev := Terrain.h(pa.x, pa.z)
 	for i in range(1, steps + 1):
 		var t := float(i) / float(steps)
@@ -180,7 +220,7 @@ static func find_path(from: Vector3, to: Vector3) -> Array:
 	g[a] = 0.0
 	push.call(0.0, a)
 
-	while heap_i.size() > 0 and expanded < 9000:
+	while heap_i.size() > 0 and expanded < 2000:
 		var cur: int = pop.call()
 		expanded += 1
 		if cur == b:
@@ -204,10 +244,10 @@ static func find_path(from: Vector3, to: Vector3) -> Array:
 				if dx != 0 and dz != 0:
 					if cells[cz * w + nx] != 1 or cells[nz * w + cx] != 1:
 						continue
+				if (links[cur] & (1 << ((dz + 1) * 3 + (dx + 1)))) == 0:
+					continue
 				var cost: float = g[cur] + (1.4142 if (dx != 0 and dz != 0) else 1.0)
 				if cost >= g[ni]:
-					continue
-				if not _step_ok(cur, ni):
 					continue
 				g[ni] = cost
 				came[ni] = cur
@@ -216,6 +256,8 @@ static func find_path(from: Vector3, to: Vector3) -> Array:
 				var heur: float = float(maxi(hx, hz)) + 0.4142 * float(mini(hx, hz))
 				push.call(cost + heur, ni)
 
+	last_expansions = expanded
+	last_found = came[b] >= 0 or a == b
 	if came[b] < 0 and a != b:
 		return []
 
