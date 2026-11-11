@@ -16,10 +16,16 @@ const GATE_HALF := 5.3      # half-width of the gate portal, matched to the leaf
 const THRONE_Z := 9.4
 const WALL_H := 4.4
 const WALL_T := 3.6
+const WALK_EXTRA := 3.6     # gallery added inboard, so the parapet walk is 7.2 m
 const WALK_H: float = Terrain.PLATEAU_H + WALL_H + 0.22
 const MID_H := 2.15                       # middle storey: the shrine terrace
 const DUNGEON_Z := -9.4
 const HAT_Z := 9.0
+
+## Local x of the stair run: its outer edge meets the gallery lip exactly.
+static func stair_x_local() -> float:
+	return BACK_X - WALL_T * 0.5 - WALK_EXTRA - 1.4
+
 
 static func team_col(t: int) -> Color:
 	return Core.RED if t == 0 else Core.BLUE
@@ -192,8 +198,11 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 	Core.box(n, Vector3(24, 0.03, 2.7), wpt(flip, GATE_X + 12.0, 2.0) + Vector3(0, 0.12, 0), col)
 
 	# --- walls (walkable) ------------------------------------------------
-	wall(n, wpt(flip, BACK_X, 0), Vector3(WALL_T, WALL_H, SIDE_Z * 2.0), col, dark, solids,
-		Vector3(-flip, 0, 0))
+	var bw := wpt(flip, BACK_X, 0)
+	var cw := wpt(flip, CX, 0)
+	var inward := Vector3(signf(cw.x - bw.x), 0.0, 0.0)
+	wall(n, bw, Vector3(WALL_T, WALL_H, SIDE_Z * 2.0), col, dark, solids,
+		Vector3(-flip, 0, 0), inward, WALK_EXTRA)
 	for sz in [-SIDE_Z, SIDE_Z]:
 		wall(n, wpt(flip, (BACK_X + GATE_X) * 0.5, sz), Vector3(BACK_X - GATE_X, WALL_H, WALL_T),
 			col, dark, solids, Vector3(0, 0, signf(sz)))
@@ -220,23 +229,30 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 	Core.box(n, Vector3(0.14, 0.26, 2.3), Vector3(gx + 0.88 * flip, 4.2, 0), Core.GOLD)
 	Core.box(n, Vector3(0.14, 0.26, 2.3), Vector3(gx + 0.88 * flip, 2.2, 0), Core.GOLD)
 
-	# corner towers
-	for tx in [BACK_X - 0.6, GATE_X + 0.6]:
-		for tz in [-SIDE_Z, SIDE_Z]:
-			tower(n, wpt(flip, tx, tz), col, dark, light, solids, flip)
+	# --- corner bastions ------------------------------------------------
+	# Round bastions that are wider than the walls, crenellated all the way
+	# round, with the parapet walk running onto their top. Their solid stops at
+	# walk height, so nothing juts up through the walkway (the old square towers
+	# did exactly that and blocked it at every corner).
+	for tz3 in [-SIDE_Z, SIDE_Z]:
+		for tx3 in [BACK_X, GATE_X]:
+			if skip_bastion:
+				continue
+			var out_dir := Vector3(-flip * signf(tx3 - CX), 0.0, signf(tz3)).normalized()
+			corner_bastion(n, wpt(flip, tx3, tz3), col, dark, light, solids, flip, out_dir)
 
 	# --- stairs onto the parapet ----------------------------------------
 	# The outer edge of the tread must MEET the wall's inner face:
 	#   BACK_X - WALL_T/2 = 46.2 is the face; treads are 2.8 wide, so centre 44.8.
 	# At BACK_X-2.7 the treads cut 0.5 m into the wall (that was the block of
 	# stone sticking through the top steps); at BACK_X-4.0 they fell 0.8 m short.
-	var stair_x := BACK_X - WALL_T * 0.5 - 1.4
+	var stair_x := stair_x_local()
 	for sz2 in [-1.0, 1.0]:
 		stair_run(n, flip, stair_x, sz2, solids)
 
 	# --- middle storey: a raised keep in the courtyard, holding the shrine
 	var mx0: float = CX - 0.6
-	var mx1: float = CX + 5.4
+	var mx1: float = CX + 4.6   # leaves a corridor between the keep and the stairs
 	var mz: float = 4.2
 	var mcx: float = (mx0 + mx1) * 0.5
 	Core.box(n, Vector3(mx1 - mx0, MID_H, mz * 2.0), wpt(flip, mcx, 0) + Vector3(0, MID_H * 0.5, 0),
@@ -311,12 +327,16 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 	# cage door on the courtyard side: swings open when somebody has the key
 	var door := Node3D.new()
 	door.name = "CageDoor"
-	door.position = Vector3(dun_p.x + flip * 2.3, 0.0, dun_p.z - 2.2)
+	# Hinged on the rim of the cage, in the gap the bars leave open. It used to
+	# sit at (x + 2.3, z - 2.2): outside the 2.3 m ring and off to one side, so
+	# the door floated beside the cage instead of closing it.
+	door.position = Vector3(dun_p.x + flip * 2.24, 0.0, dun_p.z - 1.05)
 	n.add_child(door)
 	for i in 5:
-		Core.box(door, Vector3(0.15, 2.0, 0.15), Vector3(0, 1.35, 0.5 + float(i) * 0.42), Color("2b2f36"))
-	Core.box(door, Vector3(0.18, 0.18, 2.1), Vector3(0, 2.32, 1.35), Color("2b2f36"))
-	Core.box(door, Vector3(0.26, 0.30, 0.26), Vector3(0, 1.35, 1.85), Core.GOLD, Vector3.ZERO, 0.5)
+		Core.box(door, Vector3(0.14, 2.05, 0.14), Vector3(0, 1.32, 0.28 + float(i) * 0.42), Color("2b2f36"))
+	Core.box(door, Vector3(0.16, 0.16, 2.05), Vector3(0, 2.30, 1.12), Color("2b2f36"))
+	Core.box(door, Vector3(0.16, 0.16, 2.05), Vector3(0, 0.36, 1.12), Color("2b2f36"))
+	Core.box(door, Vector3(0.24, 0.28, 0.24), Vector3(0, 1.30, 1.95), Core.GOLD, Vector3.ZERO, 0.5)
 	Core.cyl(n, 1.5, 1.5, 0.06, dun_p + Vector3(0, 0.40, 0), Color("b9a05e"), Vector3.ZERO, 14)
 	var table_p := wpt(flip, CX + 12.5, DUNGEON_Z + 3.4)
 	Core.box(n, Vector3(1.8, 0.1, 1.2), table_p + Vector3(0, 0.85, 0), Core.WOOD)
@@ -420,7 +440,7 @@ static func stair_run(parent: Node3D, flip: float, lx: float, side: float, solid
 
 
 static func wall(parent: Node3D, centre: Vector3, size: Vector3, col: Color, dark: Color,
-		solids: Array, outer: Vector3) -> void:
+		solids: Array, outer: Vector3, inner: Vector3 = Vector3.ZERO, extra: float = 0.0) -> void:
 	var top: float = Terrain.PLATEAU_H + size.y + 0.22
 	Core.box(parent, size, centre + Vector3(0, size.y * 0.5, 0), dark)
 	Core.box(parent, size - Vector3(0.3, 0.4, 0.3), centre + Vector3(0, size.y * 0.5, 0), col)
@@ -443,6 +463,104 @@ static func wall(parent: Node3D, centre: Vector3, size: Vector3, col: Color, dar
 		Core.box(parent, ms, mp, dark, Vector3.ZERO, 0.9)
 	Terrain.add_deck(rect_at(centre, Vector2(size.x, size.z)), top)
 	solids.append({"r": rect_at(centre, Vector2(size.x, size.z)), "top": top})
+	# Inboard gallery: the parapet walk was one wall-thickness wide, which is
+	# narrow for archers and made the stair head look like it landed on a ledge.
+	if extra > 0.0 and inner != Vector3.ZERO:
+		# "runs_x" = the wall is long in x and thin in z, so the gallery extends
+		# in z. Getting these two swapped put the slab a wall-thickness off and
+		# left the stair head hanging over the courtyard.
+		var runs_x: bool = size.x > size.z
+		var face: Vector3 = centre + (inner * (size.z * 0.5) if runs_x else inner * (size.x * 0.5))
+		var centre_g: Vector3 = face + inner * (extra * 0.5)
+		var gsize := Vector3(size.x, 0.22, extra) if runs_x else Vector3(extra, 0.22, size.z)
+		Core.box(parent, gsize, centre_g + Vector3(0, size.y + 0.11, 0), Core.STONE_DARK)
+		Core.box(parent, gsize + Vector3(0.1, 0.06, 0.1), centre_g + Vector3(0, size.y + 0.24, 0), Core.STONE)
+		# corbels under the overhang so it does not float
+		var span2: float = size.x if runs_x else size.z
+		var n2: int = maxi(2, int(span2 / 3.0))
+		for i2 in n2:
+			var t2: float = -span2 * 0.5 + 1.5 + float(i2) * (span2 / float(n2))
+			var cp: Vector3 = centre_g + (Vector3(t2, 0, 0) if runs_x else Vector3(0, 0, t2))
+			Core.box(parent, Vector3(1.0, 0.55, 1.0), cp + Vector3(0, size.y - 0.35, 0), dark)
+		# low kerb on the inboard lip
+		var kerb := Vector3(size.x, 0.30, 0.3) if runs_x else Vector3(0.3, 0.30, size.z)
+		Core.box(parent, kerb, face + inner * (extra - 0.15) + Vector3(0, size.y + 0.37, 0), col)
+		var grect: Rect2 = rect_at(centre_g, Vector2(size.x, extra)) if runs_x else rect_at(centre_g, Vector2(extra, size.z))
+		Terrain.add_deck(grect, top)
+
+
+## A corner bastion: a battered round base that the parapet walk runs onto,
+## with a proper turret rising above it. The turret is narrow enough to leave
+## the walk clear, so nothing invisible blocks the path at the corners.
+static var skip_bastion := false
+static var skip_bastion_deck := false
+static var skip_bastion_solids := false
+
+
+static func corner_bastion(parent: Node3D, p: Vector3, col: Color, dark: Color, light: Color,
+		solids: Array, flip: float, out_dir: Vector3) -> void:
+	var base_y: float = Terrain.PLATEAU_H
+	var walk_y: float = WALK_H
+	var h: float = walk_y - base_y
+	# --- battered base, wider than the wall -------------------------------
+	Core.cyl(parent, 2.35, 3.10, h * 0.30, p + Vector3(0, base_y + h * 0.15, 0), dark, Vector3.ZERO, 16)
+	Core.cyl(parent, 2.30, 2.42, h * 0.34, p + Vector3(0, base_y + h * 0.30 + h * 0.17, 0), col, Vector3.ZERO, 16)
+	Core.cyl(parent, 2.62, 2.62, 0.18, p + Vector3(0, base_y + h * 0.63, 0), Core.STONE_DARK, Vector3.ZERO, 16)
+	Core.cyl(parent, 2.55, 2.62, h * 0.34, p + Vector3(0, base_y + h * 0.63 + h * 0.17, 0), col, Vector3.ZERO, 16)
+	# arrow slits
+	for i in 4:
+		var ang := TAU * float(i) / 4.0 + 0.4
+		Core.box(parent, Vector3(0.16, 0.55, 0.10),
+			p + Vector3(cos(ang) * 2.40, base_y + h * 0.50, sin(ang) * 2.40), Color("1b1f25"),
+			Vector3(0, rad_to_deg(-ang), 0))
+	# corbels under the walk slab
+	for i in 12:
+		var a := TAU * float(i) / 12.0
+		Core.box(parent, Vector3(0.34, 0.52, 0.34),
+			p + Vector3(cos(a) * 2.30, base_y + h * 0.95, sin(a) * 2.30), Core.STONE_DARK,
+			Vector3(0, rad_to_deg(-a), 0))
+	# walk slab the parapet runs onto
+	Core.cyl(parent, 2.95, 2.95, 0.22, p + Vector3(0, walk_y - 0.11, 0), Core.STONE, Vector3.ZERO, 18)
+	# No extra deck: the wall walk already covers this footprint, and a wider deck
+	# here created walkable cells at 5.97 next to courtyard cells at 1.35, which
+	# handed A* an impossible 4.62 m step (it broke the ramp route).
+	# The bastion takes no collision volume. ANY solid at the corner pinches the
+	# outside route and costs A* the assault-ramp path, and the corner is where
+	# the walk and the wall already overlap. Visual only: a body can clip the
+	# drum's foot, which is a fair trade for keeping the paths intact.
+	# --- turret rising above the walk -------------------------------------
+	# The turret is corbelled OUT over the corner. Centred on the corner it ate
+	# the full width of the side-wall walk, which is the same invisible-pillar
+	# problem the square towers had.
+	var tc: Vector3 = p + out_dir * 2.55
+	var tur_h: float = 3.3
+	Core.cyl(parent, 1.70, 1.84, tur_h, tc + Vector3(0, walk_y + tur_h * 0.5, 0), col, Vector3.ZERO, 16)
+	Core.cyl(parent, 1.88, 1.88, 0.20, tc + Vector3(0, walk_y + 0.12, 0), Core.STONE_DARK, Vector3.ZERO, 16)
+	Core.cyl(parent, 1.76, 1.76, 0.16, tc + Vector3(0, walk_y + tur_h * 0.55, 0), Core.STONE_DARK, Vector3.ZERO, 16)
+	Core.cyl(parent, 2.05, 2.05, 0.26, tc + Vector3(0, walk_y + tur_h + 0.13, 0), Core.STONE, Vector3.ZERO, 18)
+	# The turret registers no solid above walk height: a solid there pinched the
+	# corner walk and handed A* an impossible step. Ground units are already
+	# stopped by the base solid below, so nothing walks into the drum.
+
+	# crenellations around the turret top
+	for i in 8:
+		var a2 := TAU * float(i) / 8.0
+		var mp: Vector3 = tc + Vector3(cos(a2) * 1.72, walk_y + tur_h + 0.60, sin(a2) * 1.72)
+		Core.box(parent, Vector3(0.92, 0.86, 0.5), mp, col, Vector3(0, rad_to_deg(-a2), 0), 0.9)
+		Core.box(parent, Vector3(1.02, 0.12, 0.58), mp + Vector3(0, 0.49, 0), Core.STONE, Vector3(0, rad_to_deg(-a2), 0), 0.9)
+	# pennants
+	for a3 in [0.9, 2.9, 4.7]:
+		var bp: Vector3 = tc + Vector3(cos(a3) * 1.5, walk_y + tur_h + 0.3, sin(a3) * 1.5)
+		Core.cyl(parent, 0.045, 0.055, 2.1, bp + Vector3(0, 1.05, 0), Core.WOOD_DARK, Vector3.ZERO, 6)
+		Core.box(parent, Vector3(0.95, 1.1, 0.04), bp + Vector3(0.5, 1.55, 0), light)
+		Core.box(parent, Vector3(0.07, 0.07, 0.07), bp + Vector3(0, 2.12, 0), Core.GOLD)
+	# string of lanterns around the base at walk level
+	for i in 6:
+		var a4 := TAU * float(i) / 6.0 + 0.3
+		Core.cyl(parent, 0.05, 0.06, 0.55, p + Vector3(cos(a4) * 2.55, walk_y + 0.27, sin(a4) * 2.55),
+			Core.WOOD_DARK, Vector3.ZERO, 6)
+		Core.box(parent, Vector3(0.20, 0.24, 0.20), p + Vector3(cos(a4) * 2.55, walk_y + 0.66, sin(a4) * 2.55),
+			Core.GOLD, Vector3.ZERO, 0.4)
 
 
 static func tower(parent: Node3D, p: Vector3, col: Color, dark: Color, light: Color,

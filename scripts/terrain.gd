@@ -331,27 +331,39 @@ static func _make_bridge(root: Node3D, bz: float) -> void:
 		# sink into the deck at the bridge mouths
 		var top: float = h(x, bz)
 		Core.box(n, Vector3(0.80, 0.16, BRIDGE_HALF_Z * 2.0 + 1.3), Vector3(x, top - 0.08, bz), shade, Vector3.ZERO, 0.85)
-	# kerb at the walking edge: the deck stops here, so nothing overhangs
+	# kerb and handrail both follow the deck profile. They used to be single
+	# straight boxes at DECK_H, so at the mouths (where the deck ramps up to the
+	# bank) the rail sliced through the planks and read as a diagonal beam.
+	var segs := 12
+	var step: float = BRIDGE_SPAN * 2.0 / float(segs)
 	for side in [-1.0, 1.0]:
-		Core.box(n, Vector3(BRIDGE_SPAN * 2.0, 0.20, 0.24),
-			Vector3(0, DECK_H + 0.02, bz + side * (BRIDGE_HALF_Z - 0.02)), Core.STONE_DARK, Vector3.ZERO, 0.9)
-	# handrail, OUTSIDE the walkable band: it used to sit 15 cm from the walking
-	# edge, so every body clipped through it and the bridge read as two walls
-	for side in [-1.0, 1.0]:
-		var zz: float = bz + side * (BRIDGE_HALF_Z + 0.52)
-		for i in 6:
-			var x := -BRIDGE_SPAN + 1.4 + float(i) * (BRIDGE_SPAN * 2.0 - 2.8) / 5.0
-			Core.cyl(n, 0.075, 0.09, 0.85, Vector3(x, DECK_H + 0.42, zz), Core.WOOD_DARK, Vector3.ZERO, 6)
-		Core.box(n, Vector3(BRIDGE_SPAN * 2.0 - 1.8, 0.11, 0.13), Vector3(0, DECK_H + 0.86, zz), Core.WOOD, Vector3.ZERO, 0.8)
+		var zk: float = bz + side * (BRIDGE_HALF_Z + 0.52)
+		for i in segs:
+			var x0: float = -BRIDGE_SPAN + float(i) * step
+			var x1: float = x0 + step
+			var xm: float = (x0 + x1) * 0.5
+			# sample the height ON the deck line: at zk the bridge zone is 0, so
+			# h() returns the riverbed and the rails were being built 6 m below
+			# the planks where nobody could see them
+			var y0: float = h(x0, bz)
+			var y1: float = h(x1, bz)
+			Core.box(n, Vector3(step + 0.02, 0.22, 0.22),
+				Vector3(xm, y0 + 0.09, bz + side * (BRIDGE_HALF_Z - 0.02)), Core.STONE_DARK, Vector3.ZERO, 0.9)
+			Core.cyl(n, 0.07, 0.085, 0.9, Vector3(xm, (y0 + y1) * 0.5 + 0.42, zk), Core.WOOD_DARK, Vector3.ZERO, 6)
+			var pitch: float = rad_to_deg(atan2(y1 - y0, step))
+			Core.box(n, Vector3(step + 0.03, 0.10, 0.12), Vector3(xm, (y0 + y1) * 0.5 + 0.86, zk),
+				Core.WOOD, Vector3(0.0, 0.0, pitch))
 	# piles into the water
 	for px in [-6.0, 0.0, 6.0]:
 		for side in [-1.0, 1.0]:
 			Core.cyl(n, 0.22, 0.26, 3.4, Vector3(px, h(px, bz) - 1.75, bz + side * 2.2), Core.WOOD_DARK, Vector3.ZERO, 6)
-	# stone quays: a retaining wall at each mouth, so the bank reads as a drop
+	# low stone abutments flanking the mouth. The old "quays" were five 1.6 m
+	# blocks in a row straight across the bridge entrance: that is the wall that
+	# showed on both sides, and nothing collided with it.
 	for side in [-1.0, 1.0]:
-		for i in 5:
-			var qx: float = side * (BRIDGE_SPAN - 0.3)
-			var qz: float = bz - BRIDGE_HALF_Z + 0.5 + float(i) * 1.9
-			var top: float = DECK_H - 0.05
-			Core.box(n, Vector3(0.9, 1.6, 1.85), Vector3(qx, top - 0.8, qz), Core.STONE_DARK, Vector3.ZERO, 0.9)
-			Core.box(n, Vector3(1.05, 0.16, 1.95), Vector3(qx, top + 0.02, qz), Core.STONE, Vector3.ZERO, 0.9)
+		for sx in [-1.0, 1.0]:
+			var ax: float = sx * (BRIDGE_SPAN + 0.25)
+			var az: float = bz + side * (BRIDGE_HALF_Z + 0.85)
+			var ay: float = h(ax, az)          # sit on the bank, not at deck height
+			Core.box(n, Vector3(0.9, 0.7, 1.5), Vector3(ax, ay + 0.1, az), Core.STONE_DARK, Vector3.ZERO, 0.9)
+			Core.box(n, Vector3(1.05, 0.12, 1.65), Vector3(ax, ay + 0.50, az), Core.STONE, Vector3.ZERO, 0.9)

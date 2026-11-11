@@ -261,8 +261,9 @@ var forced_dir := false
 
 func _run_exittest() -> void:
 	start_match(false)
-	# isolate the test: other units standing in melee range legitimately make a
-	# unit hold position, which is not what this test is about
+	# isolate the test: any unit within melee range legitimately makes a unit hold
+	# position, and the player counts, so park everyone far away first
+	place(player, Vector3(0, 0, 50))
 	for o in units.duplicate():
 		if o != player:
 			units.erase(o)
@@ -295,6 +296,7 @@ func _run_exittest() -> void:
 			if think_t >= 0.5:
 				think_t = 0.0
 				_think(u)                 # real brain, as the match runs it
+				u.target_unit = null      # this test is about leaving, not chasing
 			var dir: Vector3 = _ai_dir(u, dt)
 			if forced_dir:
 				var go: Vector3 = _gate_out(u.team)
@@ -556,7 +558,10 @@ func _run_pathaudit() -> void:
 				var t2 := float(s2) / float(nseg)
 				var q := prev.lerp(p, t2)
 				var hq: float = Terrain.h(q.x, q.z)
-				worst = maxf(worst, absf(hq - hprev))
+				if absf(hq - hprev) > worst:
+					worst = absf(hq - hprev)
+					if exittest == false and worst > Terrain.STEP_UP:
+						print("[HF] PA jump %.2f at (%.1f,%.1f) prev_h=%.2f h=%.2f" % [worst, q.x, q.z, hprev, hq])
 				hprev = hq
 			prev = p
 		var ok_step: bool = worst <= Terrain.STEP_UP + 0.001
@@ -572,6 +577,11 @@ func _run_pathaudit() -> void:
 				b, Terrain.h(Nav.centre(b).x, Nav.centre(b).z) if b >= 0 else -99.0,
 				str(path.map(func(v): return "(%0.1f,%0.1f h%0.1f)" % [v.x, v.z, Terrain.h(v.x, v.z)]))])
 	var took := Time.get_ticks_msec() - t0
+	var crest := Vector3(-(Terrain.RAMP_X + 0.0), 0, Terrain.RAMP_Z)
+	for so in solids:
+		if (so["r"] as Rect2).has_point(Vector2(crest.x, crest.z)):
+			print("[HF] PA bastion-solid over crest? tag=", so.get("tag",""), " top=", so["top"], " r=", so["r"])
+	print("[HF] PA crest h=", Terrain.h(crest.x, crest.z), " at ", crest)
 	print("[HF] PATHAUDIT cells=%d/%d (%.0f%%) %s" % [walkable, Nav.cells.size(),
 		100.0 * float(walkable) / float(Nav.cells.size()), " | ".join(lines)])
 	print("[HF] PATHAUDIT %d goals in %d ms  %s" % [goals.size(), took,
@@ -977,25 +987,42 @@ func _run_siegetest() -> void:
 func _run_walltest() -> void:
 	start_match(false)
 	var u := player
-	# red team stairs: local (BACK_X - 4, +3.15) with flip = +1
-	var base := Vector3(-(Bld.BACK_X - 4.0 + Bld.CASTLE_SHIFT), 0.0, 3.2)
+	var stair_world_x: float = -(Bld.stair_x_local() + Bld.CASTLE_SHIFT)
+	var base := Vector3(stair_world_x, 0.0, 3.2)
 	place(u, base)
 	var h0 := Terrain.h(u.pos.x, u.pos.z)
-	var climbed := false
-	for i in 500:
+	# walk up the run
+	for i in 900:
 		u.pos = move_unit(u.pos, Vector3(0, 0, 0.12), u)
-		if Terrain.h(u.pos.x, u.pos.z) > Bld.WALK_H - 0.5:
-			climbed = true
+		if Terrain.h(u.pos.x, u.pos.z) >= Bld.WALK_H - 0.05:
 			break
-	var h1 := Terrain.h(u.pos.x, u.pos.z)
-	# now try to walk straight off the parapet into the courtyard
+	var h_top := Terrain.h(u.pos.x, u.pos.z)
+	var climbed: bool = h_top >= Bld.WALK_H - 0.05
+	# step sideways onto the gallery: the head of the stair must meet the walk.
+	# Toward the wall = +x in world for the red castle (local +x maps to world -x).
 	var before := u.pos
-	for i in 40:
-		u.pos = move_unit(u.pos, Vector3(-0.12, 0, 0), u)
-	var fell := Terrain.h(u.pos.x, u.pos.z) < h1 - 1.0
-	print("[HF] WALLTEST base=%.2f top=%.2f climbed=%s walkh=%.2f off_wall=%s" % [
-		h0, h1, str(climbed), Bld.WALK_H, str(fell)])
-	print("[HF] WALLTEST ", "PASS" if climbed and not fell else "FAIL")
+	for i in 30:
+		var np: Vector3 = move_unit(u.pos, Vector3(0.12, 0, 0), u)
+		if Terrain.h(np.x, np.z) < Bld.WALK_H - 0.05:
+			break                    # reached the inboard lip
+		u.pos = np
+	var h_step: float = Terrain.h(u.pos.x, u.pos.z)
+	var lip: float = absf(h_step - h_top)
+	var on_gallery: bool = h_step >= Bld.WALK_H - 0.05
+	# measure how wide the walkable top is across the wall at that spot
+	var wide := 0.0
+	for dir in [-1.0, 1.0]:
+		var probe: float = before.x
+		while wide < 16.0 and Terrain.h(probe + dir * 0.25, before.z) >= Bld.WALK_H - 0.1:
+			wide += 0.25
+			probe += dir * 0.25
+	var prof := ""
+	for d in range(-6, 10):
+		prof += "%d:%.2f " % [d, Terrain.h(before.x + float(d), before.z)]
+	print("[HF] WALLTEST profile x ", snappedf(before.x, 0.1), " z ", snappedf(before.z, 0.1), " -> ", prof)
+	print("[HF] WALLTEST base=%.2f top=%.2f climbed=%s lip=%.2f m gallery=%s walk_width=%.2f m" % [
+		h0, h_top, str(climbed), lip, str(on_gallery), wide])
+	print("[HF] WALLTEST ", "PASS" if climbed and lip < 0.30 and wide >= 6.8 else "FAIL")
 	get_tree().quit()
 
 
@@ -1174,14 +1201,27 @@ func _setup_demo() -> void:
 		zoom_target = 23.0
 		cam_focus = Vector3(30, 0, 0)
 	elif demo == "cage":
-		place(player, Vector3(-44, 0, -7))
-		zoom = 14.0
-		zoom_target = 14.0
+		var dp: Vector3 = castles[0]["dungeon"]
+		place(player, dp + Vector3(4.0, 0, 4.0))
+		zoom = 9.0
+		zoom_target = 9.0
+		cam_focus = dp + Vector3(0, 1.2, 0)
 	elif demo == "parapet":
 		place(player, Vector3(-54, 0, -6))
 		player.set_class("ranger")
 		zoom = 27.0
 		zoom_target = 27.0
+	elif demo == "corner":
+		var c1: Vector3 = Vector3(-(Bld.BACK_X + Bld.CASTLE_SHIFT), 0.0, -Bld.SIDE_Z)
+		place(player, c1 + Vector3(9.0, 0, -9.0))
+		zoom = 13.0
+		zoom_target = 13.0
+		cam_focus = c1 + Vector3(1.5, 4.6, -1.5)
+	elif demo == "bridge":
+		place(player, Vector3(-3.0, 0, Terrain.BRIDGE_Z[1] + 1.0))
+		zoom = 20.0
+		zoom_target = 20.0
+		cam_focus = Vector3(0.0, 2.0, Terrain.BRIDGE_Z[1])
 	elif demo == "river":
 		place(player, Vector3(13, 0, 0))
 		zoom = 30.0
@@ -1268,16 +1308,16 @@ func _setup_demo() -> void:
 			print("[HF] SPECTATE telemetry -> %s" % telemetry)
 	elif demo == "stairwalk":
 		# stand three treads up the back-wall stair so the feet/tread fit can be judged
-		var sx: float = -(Bld.BACK_X - Bld.WALL_T * 0.5 - 1.4 + Bld.CASTLE_SHIFT)
+		var sx: float = -(Bld.stair_x_local() + Bld.CASTLE_SHIFT)
 		player.pos = Vector3(sx, 0.0, 7.6)
 		player.position = Vector3(player.pos.x, Terrain.h(sx, 7.6), player.pos.z)
 		for u6 in units.duplicate():
 			if u6 != player:
 				units.erase(u6)
 				u6.queue_free()
-		zoom = 7.0
-		zoom_target = 7.0
-		cam_focus = Vector3(sx, 3.6, 6.0)
+		zoom = 15.0
+		zoom_target = 15.0
+		cam_focus = Vector3(sx + 2.0, 4.6, 8.0)
 	elif demo == "staircheck":
 		player.pos = Vector3(-(Bld.BACK_X - 8.0 + Bld.CASTLE_SHIFT), 0.0, 7.0)
 		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
@@ -1512,6 +1552,12 @@ func _parse_args() -> void:
 			deckaudit = true
 		elif a == "--perf":
 			perf = true
+		elif a == "--nobastion":
+			Bld.skip_bastion = true
+		elif a == "--nobastiondeck":
+			Bld.skip_bastion_deck = true
+		elif a == "--nobastionsolids":
+			Bld.skip_bastion_solids = true
 		elif a == "--pathaudit":
 			pathaudit = true
 		elif a == "--shottest":
@@ -1615,6 +1661,10 @@ func _make_world_labels() -> void:
 	near_lbl.no_depth_test = true
 	near_lbl.visible = false
 	hint_lbl = Core.label3d(self, "", Vector3.ZERO, 40, Color(0.9, 0.95, 1.0, 0.85))
+	# same trap as near_lbl: world pixel_size 0.016 turns a 40 px hint into a
+	# 2 m tall banner across the courtyard
+	hint_lbl.fixed_size = true
+	hint_lbl.pixel_size = 0.0013
 	hint_lbl.no_depth_test = true
 	hint_lbl.visible = false
 
@@ -1939,7 +1989,7 @@ func _animate_props(dt: float) -> void:
 			c["node"].rotation.y += dt * 0.9
 			var glow: Node = c["node"].get_node_or_null("Glow")
 			if glow != null:
-				glow.scale = Vector3.ONE * (0.96 + sin(Time.get_ticks_msec() * 0.003) * 0.06)
+				Core.anim_scale(glow, Vector3.ONE * (0.96 + sin(Time.get_ticks_msec() * 0.003) * 0.06))
 	if red_princess != null and is_instance_valid(red_princess):
 		red_princess.update_princess(dt)
 	if blue_princess != null and is_instance_valid(blue_princess):
@@ -2823,7 +2873,7 @@ func _update_fx(dt: float) -> void:
 			if n is Label3D:
 				n.modulate.a = clampf(f["life"] / 0.85, 0.0, 1.0)
 			elif n is Node3D:
-				n.scale = Vector3.ONE * clampf(f["life"] * 2.2, 0.05, 1.0)
+				Core.anim_scale(n, Vector3.ONE * clampf(f["life"] * 2.2, 0.05, 1.0))
 		if f["life"] <= 0.0:
 			n.queue_free()
 			fx.remove_at(i)
@@ -2858,7 +2908,7 @@ func throw_cake(feeder: Unit, pr: Princess) -> void:
 	hm.albedo_color.a = 0.18
 	halo.material_override = hm
 	node.position = from
-	node.scale = Vector3(0.8, 0.8, 0.8)
+	Core.anim_scale(node, Vector3(0.8, 0.8, 0.8))
 	feeder.swing = 0.9
 	feeder.attack_cd = maxf(feeder.attack_cd, 0.3)
 	throws.append({
@@ -2888,7 +2938,7 @@ func _update_throws(dt: float) -> void:
 		node.position = p
 		node.rotation.x += dt * th["spin"]
 		node.rotation.y += dt * 5.0
-		node.scale = Vector3.ONE * lerpf(0.8, 1.0, k)
+		Core.anim_scale(node, Vector3.ONE * lerpf(0.8, 1.0, k))
 		# trail puffs: a 0.55-unit slice is a few pixels at play zoom, the trail is not
 		th["trail"] -= dt
 		if th["trail"] <= 0.0:
@@ -3058,7 +3108,7 @@ func _update_gates(dt: float) -> void:
 			# a damaged gate visibly sags and darkens
 			var f: float = clampf(float(g["hp"]) / float(g["max"]), 0.0, 1.0)
 			node2.rotation_degrees.x = (1.0 - f) * 7.0
-			node2.scale = Vector3(1.0, lerpf(0.86, 1.0, f), 1.0)
+			Core.anim_scale(node2, Vector3(1.0, lerpf(0.86, 1.0, f), 1.0))
 
 	# workers repair their own gate with what they carry
 	for u: Unit in units:
@@ -3156,7 +3206,7 @@ func _attach_carried_key(u: Unit) -> void:
 	if u.key_model != null and is_instance_valid(u.key_model):
 		u.key_model.queue_free()
 	u.key_model = Bld.key_rig(u, Vector3(0, 2.62, 0))
-	u.key_model.scale = Vector3(0.85, 0.85, 0.85)
+	Core.anim_scale(u.key_model, Vector3(0.85, 0.85, 0.85))
 
 
 ## Set the key down where you stand. It keeps for 20 s, then goes home.
@@ -3565,7 +3615,7 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	# through one door. Route it directly and skip the path/stuck machinery:
 	# cell snapping at the plateau lip made units ping-pong on the threshold and
 	# an entire team never got out of its own base.
-	if not chasing:
+	if true:
 		var cur_castle: int = _castle_of(u.pos)
 		if cur_castle != -1 and _castle_of(goal) != cur_castle:
 			var out_pt: Vector3 = _gate_out(cur_castle)

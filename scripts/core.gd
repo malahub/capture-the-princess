@@ -92,6 +92,15 @@ static func _gather(root: Node3D, n: Node, skip: Array, groups: Dictionary, vict
 		_gather(root, ch, skip, groups, victims)
 
 
+## Scale a primitive for animation without destroying its size. Calling
+## `mi.scale = Vector3.ONE * k` on a Core primitive wipes the dimensions that
+## live in the node scale, which is how the princess's mouth became a 1 m cube.
+static func anim_scale(mi: Node3D, f: Vector3) -> void:
+	if mi == null or not is_instance_valid(mi):
+		return
+	mi.scale = (mi.get_meta("base_scale", Vector3.ONE) as Vector3) * f
+
+
 static func mat(color: Color, rough: float = 0.82, metal: float = 0.0, emit: float = 0.0) -> StandardMaterial3D:
 	var key := "%s|%.2f|%.2f|%.2f" % [color.to_html(), rough, metal, emit]
 	if _mats.has(key):
@@ -161,6 +170,7 @@ static func box(parent: Node, size: Vector3, pos: Vector3, color: Color,
 	mi.position = pos
 	mi.rotation_degrees = rot
 	mi.set_meta("core_prim", true)
+	mi.set_meta("base_scale", mi.scale)
 	parent.add_child(mi)
 	return mi
 
@@ -185,6 +195,7 @@ static func cyl(parent: Node, top_r: float, bot_r: float, height: float, pos: Ve
 	mi.position = pos
 	mi.rotation_degrees = rot
 	mi.set_meta("core_prim", true)
+	mi.set_meta("base_scale", mi.scale)
 	parent.add_child(mi)
 	return mi
 
@@ -206,6 +217,7 @@ static func sphere(parent: Node, radius: float, pos: Vector3, color: Color,
 	mi.material_override = mat(color, rough)
 	mi.position = pos
 	mi.set_meta("core_prim", true)
+	mi.set_meta("base_scale", mi.scale)
 	parent.add_child(mi)
 	return mi
 
@@ -222,6 +234,7 @@ static func torus(parent: Node, inner: float, outer: float, pos: Vector3, color:
 	mi.position = pos
 	mi.rotation_degrees = rot
 	mi.set_meta("core_prim", true)
+	mi.set_meta("base_scale", mi.scale)
 	parent.add_child(mi)
 	return mi
 

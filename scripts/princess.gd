@@ -36,7 +36,9 @@ func setup(g: Node, t: int, dungeon_pos: Vector3, throne_pos: Vector3) -> void:
 	home_throne = throne_pos
 	rig = Bld.princess(self, team)
 	position = Vector3(dungeon_pos.x, Terrain.h(dungeon_pos.x, dungeon_pos.z), dungeon_pos.z)
-	tag = Core.label3d(self, "", Vector3(0, 2.35, 0), 40, Color.WHITE)
+	tag = Core.label3d(self, "", Vector3(0, 2.62, 0), 40, Color.WHITE)
+	# the default world pixel_size made this a 2 m tall banner across the cage
+	tag.pixel_size = 0.003
 	glow = Core.flat_disc(self, 2.5, Vector3(0, 0.03, 0), Bld.team_light(team), 0.30)
 	glow.name = "Glow"
 	recompute_target()
@@ -151,7 +153,7 @@ func update_princess(dt: float) -> void:
 		var mouth: MeshInstance3D = rig["mouth"]
 		# two open-close cycles per slice: that is what makes it chew rather than gape
 		var chew := absf(sin(p * PI * 2.6))
-		mouth.scale = Vector3(1.0 + 0.5 * chew, 1.0 + 4.0 * chew, 1.0)
+		Core.anim_scale(mouth, Vector3(1.0 + 0.5 * chew, 1.0 + 4.0 * chew, 1.0))
 	if rig.has("arm_l") and rig.has("arm_r"):
 		var arm_l: Node3D = rig["arm_l"]
 		var arm_r: Node3D = rig["arm_r"]
@@ -166,7 +168,7 @@ func update_princess(dt: float) -> void:
 		var belly: MeshInstance3D = rig["belly"]
 		var w := clampf(weight, 0.0, max_weight)
 		belly.visible = weight >= 1.0
-		belly.scale = Vector3(1.0 + 0.115 * w, 1.0 + 0.10 * w, 1.0 + 0.13 * w)
+		Core.anim_scale(belly, Vector3(1.0 + 0.115 * w, 1.0 + 0.10 * w, 1.0 + 0.13 * w))
 		belly.position.z = 0.10 + 0.02 * w
 
 	if carried_by != null:
