@@ -222,9 +222,11 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 			tower(n, wpt(flip, tx, tz), col, dark, light, solids, flip)
 
 	# --- stairs onto the parapet ----------------------------------------
-	# flush against the wall face: at BACK_X-4.0 a 0.8 m strip of courtyard sat
-	# between the top tread and the parapet, which no unit could cross
-	var stair_x := BACK_X - 2.7
+	# The outer edge of the tread must MEET the wall's inner face:
+	#   BACK_X - WALL_T/2 = 46.2 is the face; treads are 2.8 wide, so centre 44.8.
+	# At BACK_X-2.7 the treads cut 0.5 m into the wall (that was the block of
+	# stone sticking through the top steps); at BACK_X-4.0 they fell 0.8 m short.
+	var stair_x := BACK_X - WALL_T * 0.5 - 1.4
 	for sz2 in [-1.0, 1.0]:
 		stair_run(n, flip, stair_x, sz2, solids)
 

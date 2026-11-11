@@ -97,6 +97,7 @@ var shottest := false
 var pathaudit := false
 var deckaudit := false
 var snaptest := false
+var stuckaudit := false
 var perf := false
 var perf_acc := {}
 var perf_frames := 0
@@ -144,6 +145,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if stuckaudit:
+		_run_stuckaudit()
 		return
 	if snaptest:
 		_run_snaptest()
@@ -224,6 +228,46 @@ func _ready() -> void:
 ## crosses never jumps more than a unit can step.
 ## Prints the walkable height around the keep so a deck that bleeds past its
 ## platform shows up as a shape you can look at.
+## Runs the match and reports units that spend seconds with a waypoint but no
+## movement — the "NPCs get stuck" complaint, with the location to look at.
+func _run_stuckaudit() -> void:
+	start_match(false)
+	var dt := 1.0 / 60.0
+	var last := {}
+	var stuck := {}
+	var t := 0.0
+	for i in int(120.0 / dt):
+		_step(dt)
+		t += dt
+		if i % 30 != 0:
+			continue
+		for u: Unit in units:
+			if not u.alive or not u.has_waypoint:
+				continue
+			if u.target_unit != null or _gate_reach(u) or u.pos.distance_to(u.waypoint) < 0.7:
+				stuck[u.get_instance_id()] = 0.0
+				continue
+			var id: int = u.get_instance_id()
+			var prev: Vector3 = last.get(id, u.pos)
+			var moved: float = prev.distance_to(u.pos)
+			if moved < 0.35:
+				stuck[id] = float(stuck.get(id, 0.0)) + 0.5
+				if float(stuck[id]) >= 3.0:
+					print("[HF] STUCK %s at (%.1f, %.1f) wp=(%.1f, %.1f) path=%d/%d tgt=%s" % [
+						u.cls, u.pos.x, u.pos.z, u.waypoint.x, u.waypoint.z,
+						u.path_i, u.path.size(), str(u.target_unit != null)])
+					stuck[id] = 0.0
+			else:
+				stuck[id] = 0.0
+			last[id] = u.pos
+	var total := 0
+	for id2 in stuck.keys():
+		if float(stuck[id2]) > 0.0:
+			total += 1
+	print("[HF] STUCKAUDIT ran %.0f s, %d units still flagged  %s" % [t, total, "PASS" if total <= 2 else "FAIL"])
+	get_tree().quit()
+
+
 ## A crowd pressed against the keep must not get shoved onto its 2.15 m ledge.
 func _run_snaptest() -> void:
 	start_match(false)
@@ -993,6 +1037,12 @@ func _setup_demo() -> void:
 		# fire a couple of shots once the frame is warm
 		fire_at_frame = 12
 		fire_shot = {"owner": sh, "target": tg.position + Vector3(0, 1.15, 0), "kind": "arrow"}
+	elif demo == "staircheck":
+		player.pos = Vector3(-(Bld.BACK_X - 8.0 + Bld.CASTLE_SHIFT), 0.0, 7.0)
+		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
+		zoom = 12.0
+		zoom_target = 12.0
+		cam_focus = Vector3(-(Bld.BACK_X - 3.0 + Bld.CASTLE_SHIFT), 3.2, 5.0)
 	elif demo == "keyprompt":
 		# clear the field so the shot is about the prompt, not a fight
 		for u5 in units.duplicate():
@@ -1199,6 +1249,8 @@ func _parse_args() -> void:
 			input_debug = true
 		elif a == "--showsil":
 			showsil = true
+		elif a == "--stuckaudit":
+			stuckaudit = true
 		elif a == "--snaptest":
 			snaptest = true
 		elif a == "--deckaudit":
@@ -3154,6 +3206,18 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	if flat.length() < 0.5:
 		return Vector3.ZERO
 
+	# A goal inside a wall (or on top of one) is not something to walk into:
+	# resolve it to the closest cell at the unit's own level first. This is what
+	# kept a handful of soldiers leaning on a castle wall for the whole match.
+	if flat.length() > 2.0:
+		var reach_cell: int = Nav.snap_for(goal, Terrain.h(u.pos.x, u.pos.z))
+		if reach_cell >= 0:
+			var near := Nav.centre(reach_cell)
+			if near.distance_to(goal) < 7.0:
+				goal = near
+				if not chasing:
+					u.waypoint = near    # stop re-targeting the unreachable point
+
 	u.path_t -= dt
 	# replan when the path is empty, the goal moved, or the cooldown lapsed
 	var stale: bool = u.path.is_empty() or u.path_i >= u.path.size()
@@ -3166,6 +3230,13 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 		if nav_budget > 0:
 			nav_budget -= 1
 			u.path = Nav.find_path(u.pos, goal)
+			if u.path.is_empty():
+				# the goal is inside a wall or a solid footprint: walk to the
+				# nearest cell that can actually be reached instead of pressing
+				# into the brickwork forever
+				var cell: int = Nav.snap_for(goal, Terrain.h(u.pos.x, u.pos.z))
+				if cell >= 0:
+					u.path = Nav.find_path(u.pos, Nav.centre(cell))
 			u.path_i = 0
 			u.path_goal = goal
 			u.path_goal_cell = goal_cell
@@ -3180,6 +3251,14 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 				return flat.normalized()
 		if u.path.is_empty() and not Nav.built:
 			return flat.normalized()        # nav unavailable: straight line fallback
+
+	# no progress for a while (empty path or an unreachable tail): drop the goal
+	# so the brain picks a new one instead of leaning on a wall forever
+	if u.stuck_t > 2.4 or (u.path.is_empty() and u.stuck_t > 1.2):
+		u.has_waypoint = false
+		u.stuck_t = 0.0
+		u.path_t = 0.0
+		return Vector3.ZERO
 
 	var target := goal
 	while u.path_i < u.path.size():

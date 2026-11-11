@@ -43,7 +43,7 @@ static func build(sol: Array) -> void:
 		var tag: String = String(s.get("tag", ""))
 		if tag.begins_with("gate"):
 			continue                       # the gate is a door, not a wall
-		var rr: Rect2 = s["r"]
+		var rr: Rect2 = s["r"].grow(0.45)   # a body has width: keep its skin off the wall
 		var top: float = float(s["top"])
 		var ix0: int = clampi(int((rr.position.x + Terrain.HALF_X) / CELL), 0, w - 1)
 		var ix1: int = clampi(int((rr.position.x + rr.size.x + Terrain.HALF_X) / CELL), 0, w - 1)
@@ -103,6 +103,26 @@ static func centre(i: int) -> Vector3:
 
 ## Nearest walkable cell to a point, spiralling outwards — goals are often inside
 ## a wall's footprint or a hair off-mesh.
+## Nearest walkable cell to `p` whose height is reachable from `from_h`.
+static func snap_for(p: Vector3, from_h: float) -> int:
+	var start := cell_of(p)
+	var sx := start % w
+	var sz := start / w
+	for r in range(0, 10):
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if r > 0 and absi(dx) != r and absi(dz) != r:
+					continue
+				var ix := sx + dx
+				var iz := sz + dz
+				if ix < 0 or iz < 0 or ix >= w or iz >= h:
+					continue
+				var i := iz * w + ix
+				if cells[i] == 1 and absf(heights[i] - from_h) <= Terrain.STEP_UP * 1.5:
+					return i
+	return -1
+
+
 static func snap(p: Vector3) -> int:
 	var start := cell_of(p)
 	if cells[start] == 1:
