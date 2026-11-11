@@ -108,7 +108,7 @@ static func bridge_zone(x: float, z: float) -> float:
 		if dz > BRIDGE_HALF_Z:
 			continue
 		var ramp: float = clampf((BRIDGE_SPAN - absf(x)) / 2.6, 0.0, 1.0)
-		var edge: float = clampf((BRIDGE_HALF_Z - dz) / 0.18, 0.0, 1.0)
+		var edge: float = clampf((BRIDGE_HALF_Z - dz) / 0.06, 0.0, 1.0)
 		return minf(ramp, edge)
 	return 0.0
 
@@ -330,14 +330,19 @@ static func _make_bridge(root: Node3D, bz: float) -> void:
 		# the plank top follows the same surface the units walk on, so feet never
 		# sink into the deck at the bridge mouths
 		var top: float = h(x, bz)
-		Core.box(n, Vector3(0.80, 0.16, BRIDGE_HALF_Z * 2.0 + 0.5), Vector3(x, top - 0.08, bz), shade, Vector3.ZERO, 0.85)
-	# rails
+		Core.box(n, Vector3(0.80, 0.16, BRIDGE_HALF_Z * 2.0 + 1.3), Vector3(x, top - 0.08, bz), shade, Vector3.ZERO, 0.85)
+	# kerb at the walking edge: the deck stops here, so nothing overhangs
 	for side in [-1.0, 1.0]:
-		var zz: float = bz + side * (BRIDGE_HALF_Z + 0.15)
-		for i in 7:
-			var x := -BRIDGE_SPAN + 1.2 + float(i) * (BRIDGE_SPAN * 2.0 - 2.4) / 6.0
-			Core.cyl(n, 0.09, 0.11, 1.0, Vector3(x, DECK_H + 0.45, zz), Core.WOOD_DARK, Vector3.ZERO, 6)
-		Core.box(n, Vector3(BRIDGE_SPAN * 2.0 - 1.6, 0.14, 0.16), Vector3(0, DECK_H + 0.95, zz), Core.WOOD, Vector3.ZERO, 0.8)
+		Core.box(n, Vector3(BRIDGE_SPAN * 2.0, 0.20, 0.24),
+			Vector3(0, DECK_H + 0.02, bz + side * (BRIDGE_HALF_Z - 0.02)), Core.STONE_DARK, Vector3.ZERO, 0.9)
+	# handrail, OUTSIDE the walkable band: it used to sit 15 cm from the walking
+	# edge, so every body clipped through it and the bridge read as two walls
+	for side in [-1.0, 1.0]:
+		var zz: float = bz + side * (BRIDGE_HALF_Z + 0.52)
+		for i in 6:
+			var x := -BRIDGE_SPAN + 1.4 + float(i) * (BRIDGE_SPAN * 2.0 - 2.8) / 5.0
+			Core.cyl(n, 0.075, 0.09, 0.85, Vector3(x, DECK_H + 0.42, zz), Core.WOOD_DARK, Vector3.ZERO, 6)
+		Core.box(n, Vector3(BRIDGE_SPAN * 2.0 - 1.8, 0.11, 0.13), Vector3(0, DECK_H + 0.86, zz), Core.WOOD, Vector3.ZERO, 0.8)
 	# piles into the water
 	for px in [-6.0, 0.0, 6.0]:
 		for side in [-1.0, 1.0]:

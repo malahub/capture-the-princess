@@ -99,6 +99,7 @@ var deckaudit := false
 var snaptest := false
 var stuckaudit := false
 var navprobe := false
+var gateprobe := false
 var telemetry := ""
 var telemetry_t := 0.0
 var telemetry_file: FileAccess = null
@@ -133,6 +134,12 @@ func _ready() -> void:
 	Bld.scatter(world)
 	castles[0] = Bld.castle(world, 0, solids)
 	castles[1] = Bld.castle(world, 1, solids)
+	# One draw call per (mesh, colour) instead of one per pebble: the world is
+	# ~5000 MeshInstance3D nodes, which is what made the web build crawl.
+	var batched: int = Core.batch_static(world,
+		["GateLeaf", "CageDoor", "Key", "Hat", "Princess", "Cage", "Lift", "Torch_",
+		"Ground", "Water", "Ripples"])
+	print("[HF] batched %d static meshes" % batched)
 	# the map never changes between matches, so the grid is built once here
 	# rather than at every kickoff (it costs ~0.6 s)
 	Nav.build(solids)
@@ -155,6 +162,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if gateprobe:
+		_run_gateprobe()
 		return
 	if navprobe:
 		_run_navprobe()
@@ -241,6 +251,47 @@ func _ready() -> void:
 ## crosses never jumps more than a unit can step.
 ## Prints the walkable height around the keep so a deck that bleeds past its
 ## platform shows up as a shape you can look at.
+## Walks a line across a CLOSED gate and reports every point a body can pass.
+## A closed gate must be solid across the whole opening: any passable spot is a
+## hole an attacker squeezes through without breaking anything.
+func _run_gateprobe() -> void:
+	start_match(false)
+	for team in 2:
+		var g: Dictionary = gates[team]
+		var gx: float = g["pos"].x
+		var open_z := []
+		var z := -8.0
+		# approach from OUTSIDE the wall band: a point on the wall footprint reports
+		# the walkway height, which makes everything look passable
+		var ax: float = gx + (3.6 if team == 0 else -3.6)
+		while z <= 8.0:
+			var h0: float = Terrain.h(ax, z)
+			var p := Vector3(gx, 0.0, z)
+			var blocked: bool = not _can_step(p, h0, 0.40, 1 - team)   # enemy trying to pass
+			if not blocked:
+				open_z.append(z)
+			z += 0.5
+		print("[HF] GATEPROBE team=%d gate_hp=%.0f passable_points=%d %s" % [
+			team, float(g["hp"]), open_z.size(), str(open_z)])
+	get_tree().quit()
+
+
+func _count_meshes(n: Node, acc: Array) -> void:
+	if n is MeshInstance3D:
+		acc[0] += 1
+		if (n as Node3D).is_visible_in_tree():
+			acc[1] += 1
+	for ch in n.get_children():
+		_count_meshes(ch, acc)
+
+
+func _count_nodes(n: Node) -> int:
+	var c := 1
+	for ch in n.get_children():
+		c += _count_nodes(ch)
+	return c
+
+
 func _run_navprobe() -> void:
 	start_match(false)
 	var pts := [
@@ -1109,6 +1160,18 @@ func _setup_demo() -> void:
 		if telemetry != "":
 			telemetry_file = FileAccess.open(telemetry, FileAccess.WRITE)
 			print("[HF] SPECTATE telemetry -> %s" % telemetry)
+	elif demo == "stairwalk":
+		# stand three treads up the back-wall stair so the feet/tread fit can be judged
+		var sx: float = -(Bld.BACK_X - Bld.WALL_T * 0.5 - 1.4 + Bld.CASTLE_SHIFT)
+		player.pos = Vector3(sx, 0.0, 7.6)
+		player.position = Vector3(player.pos.x, Terrain.h(sx, 7.6), player.pos.z)
+		for u6 in units.duplicate():
+			if u6 != player:
+				units.erase(u6)
+				u6.queue_free()
+		zoom = 7.0
+		zoom_target = 7.0
+		cam_focus = Vector3(sx, 3.6, 6.0)
 	elif demo == "staircheck":
 		player.pos = Vector3(-(Bld.BACK_X - 8.0 + Bld.CASTLE_SHIFT), 0.0, 7.0)
 		player.position = Vector3(player.pos.x, Terrain.h(player.pos.x, player.pos.z), player.pos.z)
@@ -1323,6 +1386,10 @@ func _parse_args() -> void:
 			showsil = true
 		elif a.begins_with("--telemetry="):
 			telemetry = a.substr(12)
+		elif a == "--nogrid":
+			use_solid_grid = false
+		elif a == "--gateprobe":
+			gateprobe = true
 		elif a == "--navprobe":
 			navprobe = true
 		elif a == "--stuckaudit":
@@ -1770,6 +1837,7 @@ func _animate_props(dt: float) -> void:
 ## Profiler: every block in _step records how long it took, and the run prints a
 ## mean-ms-per-frame table. Cheap enough to leave in (it is a no-op unless --perf).
 var perf_frame_labels := {}
+var nav_t0 := 0
 var nav_budget := 2          # A* searches allowed per frame: one long path is
                              # ~4 ms, so ten of them at once was a 50 ms hitch
 
@@ -1792,6 +1860,18 @@ func _perf_report() -> void:
 		rows.append([String(k), float(perf_acc[k]) / float(perf_frames) / 1000.0])
 	rows.sort_custom(func(a, b): return a[1] > b[1])
 	var total := float(perf_frame_us) / float(perf_frames) / 1000.0
+	var counts := []
+	for child in world.get_children():
+		counts.append("%s=%d" % [child.name, _count_nodes(child)])
+	counts.sort()
+	print("[HF] PERF groups: %s" % " ".join(counts))
+	var mc := [0, 0]
+	_count_meshes(world, mc)
+	print("[HF] PERF meshes=%d visible=%d" % [mc[0], mc[1]])
+	print("[HF] PERF draws=%d objects=%d prims=%d" % [
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)])
 	print("[HF] PERF frames=%d  frame mean=%.2f ms  worst=%.2f ms  (~%.0f fps)" % [
 		perf_frames, total, float(perf_max_us) / 1000.0, 1000.0 / maxf(total, 0.01)])
 	for r in rows:
@@ -1810,6 +1890,7 @@ func _step(dt: float) -> void:
 		return
 	perf_frame_labels.clear()
 	nav_budget = 2
+	nav_t0 = Time.get_ticks_usec()
 	match_time += dt
 	var t := Time.get_ticks_usec() if perf else 0
 	_handle_player(dt)
@@ -1855,6 +1936,8 @@ func _step(dt: float) -> void:
 	_update_respawns(dt)
 	_update_dropped_hats(dt)
 	t = _pt("world_systems", t)
+	_auto_quality(dt)
+	_update_lod()
 	_update_silhouettes(dt)
 	t = _pt("silhouettes", t)
 	_maybe_fire_demo()
@@ -2218,6 +2301,32 @@ func move_unit(p: Vector3, delta: Vector3, u: Unit) -> Vector3:
 
 ## A step is legal if the ground is walkable, no wall taller than the unit's feet
 ## is in the way, and the height change is one a body can make.
+var solid_grid := {}
+var solid_dirty := true
+var use_solid_grid := true
+
+
+## Solids bucketed into 8 m cells. _can_step used to walk every rect in the
+## world for every candidate step: ~200 x 3 per unit per frame, which was most
+## of the frame at 30 units.
+func _rebuild_solid_grid() -> void:
+	solid_grid.clear()
+	solid_dirty = false
+	for i in solids.size():
+		var r: Rect2 = solids[i]["r"]
+		var cx0 := int(floor(r.position.x / 8.0))
+		var cx1 := int(floor((r.position.x + r.size.x) / 8.0))
+		var cz0 := int(floor(r.position.y / 8.0))
+		var cz1 := int(floor((r.position.y + r.size.y) / 8.0))
+		for cx in range(cx0, cx1 + 1):
+			for cz in range(cz0, cz1 + 1):
+				var k := Vector2i(cx, cz)
+				if not solid_grid.has(k):
+					solid_grid[k] = []
+				var bucket: Array = solid_grid[k]
+				bucket.append(i)
+
+
 func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
 	if not Terrain.walkable(p.x, p.z):
 		return false
@@ -2231,7 +2340,29 @@ func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
 		return false                                # too high to climb
 	if from_h - h1 > Terrain.STEP_DOWN:
 		return false                                # do not walk off the parapet
-	for s in solids:
+	if solid_dirty and use_solid_grid:
+		_rebuild_solid_grid()
+	if not use_solid_grid:
+		for s in solids:
+			var rr0: Rect2 = s["r"]
+			if float(s["top"]) < from_h + 0.25:
+				continue
+			var tag0: String = String(s.get("tag", ""))
+			if tag0 != "" and team >= 0 and tag0 == "gate%d" % team:
+				continue
+			if rr0.grow(rad).has_point(Vector2(p.x, p.z)):
+				return false
+		return true
+	var cx := int(floor(p.x / 8.0))
+	var cz := int(floor(p.z / 8.0))
+	var near: Array = []
+	for ox in [-1, 0, 1]:
+		for oz in [-1, 0, 1]:
+			var b: Variant = solid_grid.get(Vector2i(cx + ox, cz + oz), null)
+			if b != null:
+				near.append_array(b)
+	for si in near:
+		var s: Dictionary = solids[si]
 		var rr: Rect2 = s["r"]
 		if float(s["top"]) < from_h + 0.25:
 			continue                                # we are standing on top of this
@@ -2754,6 +2885,7 @@ func _damage_gate(team: int, dmg: float) -> void:
 	g["last_hit"] = Time.get_ticks_msec() / 1000.0
 	if g["hp"] <= 0.0:
 		g["alive"] = false
+		solid_dirty = true
 		_break_gate_solid(g)
 		var node: Node3D = g["node"]
 		if is_instance_valid(node):
@@ -3311,12 +3443,15 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	# A goal inside a wall (or on top of one) is not something to walk into:
 	# resolve it to the closest cell at the unit's own level first. This is what
 	# kept a handful of soldiers leaning on a castle wall for the whole match.
-	if true:
+	if u.snap_src.distance_to(goal) > 0.6:
+		u.snap_src = goal
+		u.snap_dst = goal
 		var reach_cell: int = Nav.snap_for(goal, Terrain.h(u.pos.x, u.pos.z))
 		if reach_cell >= 0:
 			var near := Nav.centre(reach_cell)
 			if near.distance_to(goal) < 7.0 and near.distance_to(u.pos) > 0.35:
 				goal = near
+				u.snap_dst = near
 				if not chasing:
 					u.waypoint = near    # stop re-targeting the unreachable point
 
@@ -3329,7 +3464,9 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	# the path is still right: replanning on "moved" alone was the remaining cost.
 	var same_cell: bool = goal_cell == u.path_goal_cell and not u.path.is_empty() and u.path_i < u.path.size()
 	if u.path_t <= 0.0 and not same_cell and (stale or moved):
-		if nav_budget > 0:
+		if nav_budget > 0 and (Time.get_ticks_usec() - nav_t0) < 4500:
+			# time-capped, not just count-capped: one pathological path used to
+			# cost 30 ms in a single frame and read as a hard hitch
 			nav_budget -= 1
 			u.path = Nav.find_path(u.pos, goal)
 			if u.path.is_empty():
@@ -3679,23 +3816,92 @@ func _unit_hidden(u: Unit) -> bool:
 
 
 var occ_t := 0.0
+var occ_i := 0
+
+
+## Wide shots drop the character rigs to 3-primitive proxies. A rig is ~83
+## MeshInstance3D; thirty rigs is 2500 draw calls, which is why the spectator
+## view crawled. The proxy keeps the position and team colour and nothing else.
+## The frame budget cannot be assumed: this has to hold up on a laptop doing
+## WebGL. If the game cannot hold 30 fps it sheds work itself, worst-first:
+## shadows, then scenery draw distance, then character detail.
+var quality := 2
+var q_t := 0.0
+var q_frames := 0
+
+func _auto_quality(dt: float) -> void:
+	if demo != "":
+		return                     # harness runs must not change their own workload
+	q_t += dt
+	q_frames += 1
+	if q_t < 2.5:
+		return
+	var fps: float = float(q_frames) / q_t
+	q_t = 0.0
+	q_frames = 0
+	if fps < 27.0 and quality > 0:
+		quality -= 1
+		apply_quality()
+	elif fps > 58.0 and quality < 2:
+		quality += 1
+		apply_quality()
+
+
+func apply_quality() -> void:
+	var sun: DirectionalLight3D = get_node_or_null("Sun")
+	if sun != null:
+		sun.shadow_enabled = quality >= 2
+	var env: Environment = null
+	if world != null and world.has_node("WorldEnvironment"):
+		env = (world.get_node("WorldEnvironment") as WorldEnvironment).environment
+	if env != null:
+		env.volumetric_fog_enabled = quality >= 1
+
+
+func _update_lod() -> void:
+	var far := zoom > 38.0
+	for u: Unit in units:
+		if not is_instance_valid(u):
+			continue
+		var on: bool = far or u.position.distance_to(cam_focus) > 26.0
+		u.set_lod(on)
 
 
 func _update_silhouettes(dt: float) -> void:
+	# A wide shot sees everything: the outline pass is pure cost there (it was
+	# 15-23 ms per frame in spectate) and tells the player nothing.
+	if zoom > 45.0:
+		if occ_t >= 0.0:
+			occ_t = -1.0
+			for u0: Unit in units:
+				if is_instance_valid(u0):
+					u0.show_silhouette(false)
+		return
+	if occ_t < 0.0:
+		occ_t = 0.0
 	occ_t += dt
-	if occ_t < 0.10:
+	if occ_t < 0.08:
 		return
 	occ_t = 0.0
-	for u: Unit in units:
+	# Stagger: a few units per frame instead of all of them on one frame. The old
+	# way put the whole pass (30 units x 2 heights x rect tests) in a single frame
+	# every 100 ms, which read as a stutter.
+	var n := units.size()
+	if n == 0:
+		return
+	var budget: int = mini(4, n)
+	for k in budget:
+		occ_i = (occ_i + 1) % n
+		var u: Unit = units[occ_i]
 		if not is_instance_valid(u):
 			continue
 		if not u.alive:
 			u.show_silhouette(false)
 			continue
-		if u.position.distance_to(cam_focus) > 60.0:
+		if u.position.distance_to(cam_focus) > 42.0:
 			u.show_silhouette(false)
 			continue
-		u.show_silhouette(showsil or _unit_hidden(u))
+			u.show_silhouette(showsil or _unit_hidden(u))
 
 
 func _maybe_fire_demo() -> void:

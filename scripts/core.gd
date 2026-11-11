@@ -34,6 +34,64 @@ const TEAL := Color("3f9c9c")
 # ---------------------------------------------------------------- materials
 static var _mats: Dictionary = {}
 
+## Collapse every static MeshInstance3D under `root` into one MultiMeshInstance3D
+## per (mesh, colour, roughness). Subtrees whose name matches `skip` are left
+## alone (they get hidden or animated later: gate leaf, cage door, key, hats).
+static func batch_static(root: Node3D, skip: Array) -> int:
+	var groups := {}
+	var victims: Array = []
+	_gather(root, root, skip, groups, victims)
+	if victims.is_empty():
+		return 0
+	for v in victims:
+		var p: Node = v.get_parent()
+		if p != null:
+			p.remove_child(v)
+		v.free()
+	var root_inv: Transform3D = root.global_transform.affine_inverse()
+	for key in groups.keys():
+		var g: Dictionary = groups[key]
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = g["mesh"]
+		mm.instance_count = g["xf"].size()
+		for i in g["xf"].size():
+			mm.set_instance_transform(i, root_inv * (g["xf"][i] as Transform3D))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = mat(g["col"], g["rough"])
+		root.add_child(mmi)
+	return victims.size()
+
+
+static func _gather(root: Node3D, n: Node, skip: Array, groups: Dictionary, victims: Array) -> void:
+	for ch in n.get_children():
+		var nm: String = String(ch.name)
+		var blocked := false
+		for sk in skip:
+			if nm.find(String(sk)) >= 0:
+				blocked = true
+				break
+		if blocked:
+			continue
+		if ch is MeshInstance3D and ch.mesh != null and ch.material_override != null:
+			# Only shared unit primitives: a custom mesh (terrain, water, the
+			# crown torus) carries vertex colours or transparency that a
+			# MultiMesh override would throw away.
+			var shared: bool = ch.has_meta("core_prim")
+			var m: BaseMaterial3D = ch.material_override
+			if not shared or m.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
+				continue
+			var key := "%d|%s|%.2f" % [ch.mesh.get_instance_id(), m.albedo_color.to_html(), m.roughness]
+			if not groups.has(key):
+				groups[key] = {"mesh": ch.mesh, "col": m.albedo_color, "rough": m.roughness, "xf": []}
+			var g: Dictionary = groups[key]
+			g["xf"].append(ch.global_transform)
+			victims.append(ch)
+			continue
+		_gather(root, ch, skip, groups, victims)
+
+
 static func mat(color: Color, rough: float = 0.82, metal: float = 0.0, emit: float = 0.0) -> StandardMaterial3D:
 	var key := "%s|%.2f|%.2f|%.2f" % [color.to_html(), rough, metal, emit]
 	if _mats.has(key):
@@ -50,15 +108,59 @@ static func mat(color: Color, rough: float = 0.82, metal: float = 0.0, emit: flo
 	return m
 
 # ---------------------------------------------------------------- primitives
+# Shared unit meshes: a box is a 1 m cube scaled by the node transform. That
+# lets multi_mesh() instance hundreds of them in one draw call, which is what
+# took the wide view from ~7000 draw calls to a few hundred.
+static var _unit_box: BoxMesh = null
+static var _unit_sphere: SphereMesh = null
+static var _unit_cyl: CylinderMesh = null
+
+static var _mesh_cache := {}
+
+
+## Identical primitives must share one mesh resource or a MultiMesh cannot
+## instance them together. This is why only a quarter of the world batched.
+static func cached_mesh(key: String, maker: Callable) -> Mesh:
+	if not _mesh_cache.has(key):
+		_mesh_cache[key] = maker.call()
+	return _mesh_cache[key]
+
+
+static func unit_box() -> BoxMesh:
+	if _unit_box == null:
+		_unit_box = BoxMesh.new()
+		_unit_box.size = Vector3.ONE
+	return _unit_box
+
+static func unit_sphere() -> SphereMesh:
+	if _unit_sphere == null:
+		_unit_sphere = SphereMesh.new()
+		_unit_sphere.radius = 1.0
+		_unit_sphere.height = 2.0
+		_unit_sphere.radial_segments = 12
+		_unit_sphere.rings = 6
+	return _unit_sphere
+
+static func unit_cyl() -> CylinderMesh:
+	if _unit_cyl == null:
+		_unit_cyl = CylinderMesh.new()
+		_unit_cyl.top_radius = 1.0
+		_unit_cyl.bottom_radius = 1.0
+		_unit_cyl.height = 1.0
+		_unit_cyl.radial_segments = 16
+		_unit_cyl.rings = 1
+	return _unit_cyl
+
+
 static func box(parent: Node, size: Vector3, pos: Vector3, color: Color,
 		rot: Vector3 = Vector3.ZERO, rough: float = 0.85) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	mi.mesh = bm
+	mi.mesh = unit_box()
+	mi.scale = size
 	mi.material_override = mat(color, rough)
 	mi.position = pos
 	mi.rotation_degrees = rot
+	mi.set_meta("core_prim", true)
 	parent.add_child(mi)
 	return mi
 
@@ -66,30 +168,44 @@ static func cyl(parent: Node, top_r: float, bot_r: float, height: float, pos: Ve
 		color: Color, rot: Vector3 = Vector3.ZERO, segs: int = 16,
 		rough: float = 0.85) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
-	var cm := CylinderMesh.new()
-	cm.top_radius = top_r
-	cm.bottom_radius = bot_r
-	cm.height = height
-	cm.radial_segments = segs
-	cm.rings = 1
-	mi.mesh = cm
+	if is_equal_approx(top_r, bot_r) and segs == 16:
+		mi.mesh = unit_cyl()
+		mi.scale = Vector3(top_r, height, top_r)
+	else:
+		var kr := "c|%.3f|%.3f|%.3f|%d" % [top_r, bot_r, height, segs]
+		mi.mesh = cached_mesh(kr, func() -> Mesh:
+			var cm := CylinderMesh.new()
+			cm.top_radius = top_r
+			cm.bottom_radius = bot_r
+			cm.height = height
+			cm.radial_segments = segs
+			cm.rings = 1
+			return cm)
 	mi.material_override = mat(color, rough)
 	mi.position = pos
 	mi.rotation_degrees = rot
+	mi.set_meta("core_prim", true)
 	parent.add_child(mi)
 	return mi
 
 static func sphere(parent: Node, radius: float, pos: Vector3, color: Color,
 		flat: float = 1.0, segs: int = 12, rough: float = 0.8) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = radius
-	sm.height = radius * 2.0 * flat
-	sm.radial_segments = segs
-	sm.rings = maxi(4, segs / 2)
-	mi.mesh = sm
+	if segs == 12:
+		mi.mesh = unit_sphere()
+		mi.scale = Vector3(radius, radius * flat, radius)
+	else:
+		var ks := "s|%.3f|%.3f|%d" % [radius, flat, segs]
+		mi.mesh = cached_mesh(ks, func() -> Mesh:
+			var sm := SphereMesh.new()
+			sm.radius = radius
+			sm.height = radius * 2.0 * flat
+			sm.radial_segments = segs
+			sm.rings = maxi(4, segs / 2)
+			return sm)
 	mi.material_override = mat(color, rough)
 	mi.position = pos
+	mi.set_meta("core_prim", true)
 	parent.add_child(mi)
 	return mi
 
@@ -105,6 +221,7 @@ static func torus(parent: Node, inner: float, outer: float, pos: Vector3, color:
 	mi.material_override = mat(color, 0.7)
 	mi.position = pos
 	mi.rotation_degrees = rot
+	mi.set_meta("core_prim", true)
 	parent.add_child(mi)
 	return mi
 

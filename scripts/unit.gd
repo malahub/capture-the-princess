@@ -23,6 +23,11 @@ var wood := 0                 # building materials, worker only
 var metal := 0
 var gather_t := 0.0
 var idle_t := 0.0
+var lod_root: Node3D = null
+var lod_mode := false
+var detail_nodes: Array = []
+var snap_src := Vector3.ZERO
+var snap_dst := Vector3.ZERO
 var repair_t := 0.0
 var key_model: Node3D = null  # the enemy key, held over the head
 var path: Array = []          # A* waypoints, consumed front to back
@@ -76,11 +81,15 @@ func setup(g: Node, t: int, klass: String, player: bool) -> void:
 func set_class(klass: String) -> void:
 	if rig.has("root") and is_instance_valid(rig["root"]):
 		rig["root"].queue_free()
+	if lod_root != null and is_instance_valid(lod_root):
+		lod_root.queue_free()
+		lod_root = null
 	cls = klass
 	max_hp = HPS[klass]
 	hp = minf(hp, max_hp) if hp > 0.0 else max_hp
 	speed = SPEEDS[klass]
 	rig = Bld.fighter(self, team, klass)
+	_build_lod()
 	_build_silhouette()
 	if marker != null:
 		marker = null
@@ -107,6 +116,7 @@ func set_class(klass: String) -> void:
 		you_label = Core.label3d(p, "YOU", Vector3(0, 4.3, 0), 38, Core.GOLD)
 		you_label.no_depth_test = false
 	_build_hpbar()
+	_capture_detail()
 
 
 func _build_hpbar() -> void:
@@ -181,6 +191,49 @@ func _build_silhouette() -> void:
 		mi.position = p[0]
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ghost.add_child(mi)
+
+
+## A character is ~83 MeshInstance3D nodes. Thirty of them is 2500 draw calls,
+## which is what made the wide spectate view unplayable. Past a distance, swap
+## the rig for three primitives: same colour, same place, 1/25 the draws.
+func _build_lod() -> void:
+	lod_root = Node3D.new()
+	lod_root.name = "LOD"
+	add_child(lod_root)
+	var col: Color = Core.RED if team == 0 else Core.BLUE
+	var light: Color = Core.RED_LIGHT if team == 0 else Core.BLUE_LIGHT
+	Core.cyl(lod_root, 0.30, 0.36, 1.20, Vector3(0, 0.62, 0), col, Vector3.ZERO, 6)
+	Core.sphere(lod_root, 0.22, Vector3(0, 1.34, 0), Core.SKIN, 1.0, 6, 0.8)
+	Core.cyl(lod_root, 0.40, 0.40, 0.10, Vector3(0, 0.05, 0), light, Vector3.ZERO, 6)
+	Core.box(lod_root, Vector3(0.62, 0.34, 0.16), Vector3(0, 0.95, -0.24), light)
+	lod_root.visible = false
+
+
+## Everything the rig is made of, so LOD can hide the lot. Hiding only
+## rig["root"] left the weapons and trims drawing, which is why the wide view
+## stayed slow after the first LOD attempt.
+func _capture_detail() -> void:
+	detail_nodes.clear()
+	for ch in get_children():
+		if ch == lod_root or ch == ghost or ch == hpbar or ch == deco:
+			continue
+		if ch is Label3D:
+			continue
+		detail_nodes.append(ch)
+
+
+func set_lod(on: bool) -> void:
+	if on == lod_mode:
+		return
+	var detailed: bool = rig.has("root") and is_instance_valid(rig["root"])
+	if on and not detailed:
+		return
+	lod_mode = on
+	for ch in detail_nodes:
+		if is_instance_valid(ch):
+			(ch as Node3D).visible = not on
+	if lod_root != null and is_instance_valid(lod_root):
+		lod_root.visible = on
 
 
 func show_silhouette(on: bool) -> void:

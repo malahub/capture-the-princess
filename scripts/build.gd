@@ -12,6 +12,7 @@ const CASTLE_SHIFT := Terrain.CASTLE_X - PLATEAU_HX - GATE_X - 0.6
 const GATE_ABS := GATE_X + CASTLE_SHIFT   # |x| of the gate plane in world space
 const BACK_X := 48.0        # back wall |x|
 const SIDE_Z := 17.0        # side wall |z|
+const GATE_HALF := 5.3      # half-width of the gate portal, matched to the leaf
 const THRONE_Z := 9.4
 const WALL_H := 4.4
 const WALL_T := 3.6
@@ -196,10 +197,13 @@ static func castle(root: Node3D, team: int, solids: Array) -> Dictionary:
 	for sz in [-SIDE_Z, SIDE_Z]:
 		wall(n, wpt(flip, (BACK_X + GATE_X) * 0.5, sz), Vector3(BACK_X - GATE_X, WALL_H, WALL_T),
 			col, dark, solids, Vector3(0, 0, signf(sz)))
-	# front wall, split around a 10-wide gate
+	# Front wall, split around the gate. The split used to be at |z| = 7.5 while
+	# the gate leaf only reaches 5.3, which left a 2.2 m hole either side: that
+	# is how units were walking straight through the castle wall next to a
+	# closed gate. The split now matches the leaf exactly.
 	for fz in [-1.0, 1.0]:
-		var seg_z: float = fz * ((SIDE_Z + 5.0) * 0.5 + 2.5)
-		var seg_len: float = SIDE_Z - 5.0
+		var seg_z: float = fz * (GATE_HALF + SIDE_Z) * 0.5
+		var seg_len: float = SIDE_Z - GATE_HALF
 		wall(n, wpt(flip, GATE_X, seg_z), Vector3(WALL_T, WALL_H, seg_len), col, dark, solids,
 			Vector3(flip, 0, 0))
 	# gate arch
@@ -406,9 +410,11 @@ static func stair_run(parent: Node3D, flip: float, lx: float, side: float, solid
 		var h: float = Terrain.PLATEAU_H + rise * float(i + 1)
 		var lz: float = z0 + side * run * float(i)
 		var p := wpt(flip, lx, lz)
-		# solid riser: bottom sits on the previous step, top IS the walk surface,
-		# so the tread and Terrain.h agree to the millimetre
-		Core.box(parent, Vector3(2.7, rise, run + 0.12), Vector3(p.x, h - rise * 0.5, p.z), Core.STONE_DARK, Vector3.ZERO, 0.9)
+		# A solid block from the floor to the tread top. Each step used to be a
+		# 0.42 m slab floating in mid-air, which read as a stack of loose shelves
+		# with shadow gaps underneath rather than a staircase.
+		var bh: float = h - Terrain.PLATEAU_H
+		Core.box(parent, Vector3(2.7, bh, run + 0.12), Vector3(p.x, Terrain.PLATEAU_H + bh * 0.5, p.z), Core.STONE_DARK, Vector3.ZERO, 0.9)
 		Core.box(parent, Vector3(2.8, 0.05, run + 0.14), Vector3(p.x, h - 0.025, p.z), Core.STONE, Vector3.ZERO, 0.9)
 		Terrain.add_deck(Rect2(p.x - 1.4, p.z - run * 0.5 - 0.06, 2.8, run + 0.12), h)
 
