@@ -27,6 +27,8 @@ var lod_root: Node3D = null
 var lod_mode := false
 var detail_nodes: Array = []
 var snap_src := Vector3.ZERO
+var back_t := 0.0
+var last_good := Vector3.ZERO
 var snap_dst := Vector3.ZERO
 var repair_t := 0.0
 var key_model: Node3D = null  # the enemy key, held over the head
@@ -291,7 +293,9 @@ func update_unit(dt: float, dir: Vector3, aim: Vector3) -> void:
 	pos = game.move_unit(pos, vel * dt, self)
 	var moved := (pos - before).length()
 	if d.length() > 0.5:
-		if moved < 0.02 * d.length():
+		# relative to what this body can actually do, not a fixed 1.2 m/s: a unit
+		# creeping at 1.16 m/s was flagged stuck forever and sidestepped in circles
+		if moved < sp * dt * 0.45:
 			stuck_t += dt
 		else:
 			stuck_t = maxf(0.0, stuck_t - dt * 2.0)

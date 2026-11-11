@@ -168,15 +168,25 @@ static func _leg_ok(pa: Vector3, pb: Vector3) -> bool:
 
 
 ## 8-connected A*. Returns world points from (excluding) the start to the goal.
+static var last_fail := ""
+
+
 static func find_path(from: Vector3, to: Vector3) -> Array:
+	last_fail = ""
 	if not built:
+		last_fail = "not built"
 		return []
 	var a := snap(from)
 	var b := snap(to)
-	if a < 0 or b < 0:
+	if a < 0:
+		last_fail = "no start cell h=%.2f at (%.1f,%.1f)" % [Terrain.h(from.x, from.z), from.x, from.z]
+		return []
+	if b < 0:
+		last_fail = "no goal cell h=%.2f at (%.1f,%.1f)" % [Terrain.h(to.x, to.z), to.x, to.z]
 		return []
 	if a == b:
 		return [to]
+
 
 	var n := w * h
 	var g := PackedFloat32Array()
@@ -322,6 +332,11 @@ static func find_path(from: Vector3, to: Vector3) -> Array:
 
 
 ## Straight-line walkability, used to smooth the grid path.
+## Public: can a body walk the straight line between these two points?
+static func line_clear(a: Vector3, b: Vector3) -> bool:
+	return _clear(a, b)
+
+
 static func _clear(a: Vector3, b: Vector3) -> bool:
 	var d := Vector3(b.x - a.x, 0.0, b.z - a.z)
 	var dist := d.length()

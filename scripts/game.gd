@@ -100,6 +100,7 @@ var snaptest := false
 var stuckaudit := false
 var navprobe := false
 var gateprobe := false
+var exittest := false
 var telemetry := ""
 var telemetry_t := 0.0
 var telemetry_file: FileAccess = null
@@ -162,6 +163,9 @@ func _ready() -> void:
 	if simtest > 0.0:
 		autoplay = true
 		_run_simtest()
+		return
+	if exittest:
+		_run_exittest()
 		return
 	if gateprobe:
 		_run_gateprobe()
@@ -251,6 +255,85 @@ func _ready() -> void:
 ## crosses never jumps more than a unit can step.
 ## Prints the walkable height around the keep so a deck that bleeds past its
 ## platform shows up as a shape you can look at.
+## Can a unit actually leave its own castle? Break the gate and walk it out.
+var forced_dir := false
+
+
+func _run_exittest() -> void:
+	start_match(false)
+	# isolate the test: other units standing in melee range legitimately make a
+	# unit hold position, which is not what this test is about
+	for o in units.duplicate():
+		if o != player:
+			units.erase(o)
+			o.queue_free()
+	for team in 2:
+		for o2 in units.duplicate():          # isolate: one unit per run
+			if o2 != player:
+				units.erase(o2)
+				o2.queue_free()
+		# the ENEMY gate is broken; our own gate is intact and should open for us
+		var g: Dictionary = gates[1 - team]
+		g["hp"] = 0.0
+		g["alive"] = false
+		_break_gate_solid(g)
+		var u := _new_unit(team, "warrior", false)
+		var spawn: Vector3 = castles[team]["spawn"]
+		place(u, spawn)
+		u.brain = "attacker"
+		units.append(u)
+		var start_inside: bool = _inside(team, u.pos)
+		var target: Vector3 = Vector3(-spawn.x, 0, spawn.z)
+		var t := 0.0
+		var dt := 1.0 / 60.0
+		var best := 1e9
+		var dbg := 0
+		var sum_moved := 0.0
+		var think_t := 0.0
+		while t < 25.0:
+			think_t += dt
+			if think_t >= 0.5:
+				think_t = 0.0
+				_think(u)                 # real brain, as the match runs it
+			var dir: Vector3 = _ai_dir(u, dt)
+			if forced_dir:
+				var go: Vector3 = _gate_out(u.team)
+				dir = Vector3(go.x - u.pos.x, 0.0, go.z - u.pos.z).normalized()
+			var bp: Vector3 = u.pos
+			u.update_unit(dt, dir, target)
+			sum_moved += u.pos.distance_to(bp)
+			t += dt
+			if dbg < 5 and int(t / 5.0) == dbg + 1:
+				dbg += 1
+				var first := "-"
+				if u.path.size() > 0:
+					first = str(u.path[mini(u.path_i, u.path.size() - 1)])
+				var next := u.pos + Vector3(dir.x, 0, dir.z) * 0.4
+				print("[HF]   t=", int(t), " y=", snappedf(u.position.y, 0.01), " h=", snappedf(Terrain.h(u.pos.x, u.pos.z), 0.01),
+					" pos=(", snappedf(u.pos.x, 0.1), ",", snappedf(u.pos.z, 0.1), ")",
+					" wp=(", snappedf(u.waypoint.x, 0.1), ",", snappedf(u.waypoint.z, 0.1), ")",
+					" has=", u.has_waypoint, " tgt=", (str(u.target_unit.pos) if (u.target_unit != null and is_instance_valid(u.target_unit)) else "null"),
+					" idle=", snappedf(u.idle_t, 0.1), " stuck=", snappedf(u.stuck_t, 0.1),
+					" path=", u.path_i, "/", u.path.size(), " first=", first,
+					" dir=(", snappedf(dir.x, 0.01), ",", snappedf(dir.z, 0.01), ")",
+					" vel=", snappedf(u.vel.length(), 0.01), " sum=", snappedf(sum_moved, 0.01),
+					" canstep=", _can_step(next, Terrain.h(u.pos.x, u.pos.z), 0.4, u.team),
+					" blocker=", _blocker(next, Terrain.h(u.pos.x, u.pos.z), 0.4, u.team))
+			best = minf(best, absf(u.pos.x - spawn.x))
+		if _inside(team, u.pos):
+			var h0 := Terrain.h(u.pos.x, u.pos.z)
+			for dv in [Vector3(0.09,0,0), Vector3(-0.09,0,0), Vector3(0,0,0.09), Vector3(0,0,-0.09)]:
+				var q: Vector3 = u.pos + dv
+				print("[HF]   step ", dv, " -> h=", snappedf(Terrain.h(q.x, q.z), 0.01),
+					" dh=", snappedf(Terrain.h(q.x, q.z) - h0, 0.01),
+					" ok=", _can_step(q, h0, 0.4, team),
+					" walk=", Terrain.walkable(q.x, q.z))
+		print("[HF] EXITTEST team=%d inside_start=%s moved=%.1f m from_own_gate=%.1f x=%.1f (spawn %.1f) %s" % [
+			team, str(start_inside), u.pos.distance_to(spawn), best, u.pos.x, spawn.x,
+			"ESCAPED" if _inside(team, u.pos) == false else "TRAPPED"])
+	get_tree().quit()
+
+
 ## Walks a line across a CLOSED gate and reports every point a body can pass.
 ## A closed gate must be solid across the whole opening: any passable spot is a
 ## hole an attacker squeezes through without breaking anything.
@@ -276,6 +359,27 @@ func _run_gateprobe() -> void:
 	get_tree().quit()
 
 
+## Why is this step illegal? Returns a short description of the first blocker.
+func _blocker(p: Vector3, from_h: float, rad: float, team: int) -> String:
+	if not Terrain.walkable(p.x, p.z):
+		return "water/edge"
+	var h1 := Terrain.h(p.x, p.z)
+	if h1 - from_h > Terrain.STEP_UP:
+		return "step up %.2f" % (h1 - from_h)
+	if from_h - h1 > 2.45:
+		return "drop %.2f" % (from_h - h1)
+	for s1 in solids:
+		var rr: Rect2 = s1["r"]
+		if float(s1["top"]) < from_h + 0.25:
+			continue
+		var tag1: String = String(s1.get("tag", ""))
+		if tag1 != "" and tag1 == "gate%d" % team:
+			continue
+		if rr.grow(rad).has_point(Vector2(p.x, p.z)):
+			return "solid '%s' top=%.1f r=%s" % [tag1, float(s1["top"]), str(rr)]
+	return "clear"
+
+
 func _count_meshes(n: Node, acc: Array) -> void:
 	if n is MeshInstance3D:
 		acc[0] += 1
@@ -295,9 +399,8 @@ func _count_nodes(n: Node) -> int:
 func _run_navprobe() -> void:
 	start_match(false)
 	var pts := [
-		Vector3(-0.1, 0, -4.0), Vector3(1.9, 0, -3.5), Vector3(0.0, 0, 0.0),
-		Vector3(38.9, 0, 6.5), Vector3(-41.1, 0, -19.6), Vector3(-41.7, 0, -8.6),
-		Vector3(-20.0, 0, -4.0), Vector3(20.0, 0, 4.0),
+		Vector3(58.5, 0, 4.4), Vector3(68.7, 0, 14.4), Vector3(-42.5, 0, -13.9),
+		Vector3(-40.2, 0, -5.3), Vector3(43.0, 0, 4.0), Vector3(38.9, 0, 0.0),
 	]
 	for p: Vector3 in pts:
 		var i: int = Nav.cell_of(p)
@@ -310,7 +413,10 @@ func _run_navprobe() -> void:
 			if rr.has_point(Vector2(p2.x, p2.z)):
 				print("[HF] NAVPROBE solid over (%.1f,%.1f): tag='%s' top=%.2f ground=%.2f" % [
 					p2.x, p2.z, String(so.get("tag","")), float(so["top"]), Terrain.h(p2.x, p2.z)])
-	var pairs := [[Vector3(-0.1,0,-4.0), Vector3(-41.4,0,0.0)],
+	var pairs := [[Vector3(58.5,0,4.4), Vector3(-41.4,0,0.0)],
+		[Vector3(68.7,0,14.4), Vector3(-41.4,0,0.0)],
+		[Vector3(-42.5,0,-13.9), Vector3(41.4,0,0.0)],
+		[Vector3(-0.1,0,-4.0), Vector3(-41.4,0,0.0)],
 		[Vector3(1.9,0,-3.5), Vector3(-41.4,0,0.0)],
 		[Vector3(-40,0,0), Vector3(40,0,0)],
 		[Vector3(-40,0,20), Vector3(40,0,-20)]]
@@ -1388,6 +1494,12 @@ func _parse_args() -> void:
 			telemetry = a.substr(12)
 		elif a == "--nogrid":
 			use_solid_grid = false
+		elif a == "--exittest":
+			exittest = true
+		elif a == "--exittestdir":
+			forced_dir = true
+			exittest = true
+			exittest = true
 		elif a == "--gateprobe":
 			gateprobe = true
 		elif a == "--navprobe":
@@ -2286,12 +2398,12 @@ func move_unit(p: Vector3, delta: Vector3, u: Unit) -> Vector3:
 		np.z = clampf(np.z, -Terrain.HALF_Z + 1.5, Terrain.HALF_Z - 1.5)
 		u.pos = np
 		return np
-	if not _can_step(np, h0, rad, u.team):
+	if not _can_step(np, h0, rad, u.team, p):
 		var try_x := Vector3(np.x, 0, p.z)
 		var try_z := Vector3(p.x, 0, np.z)
-		if _can_step(try_x, h0, rad, u.team):
+		if _can_step(try_x, h0, rad, u.team, p):
 			np = try_x
-		elif _can_step(try_z, h0, rad, u.team):
+		elif _can_step(try_z, h0, rad, u.team, p):
 			np = try_z
 		else:
 			np = p
@@ -2327,7 +2439,7 @@ func _rebuild_solid_grid() -> void:
 				bucket.append(i)
 
 
-func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
+func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1, from_p: Vector3 = Vector3(1e9, 0, 1e9)) -> bool:
 	if not Terrain.walkable(p.x, p.z):
 		return false
 	var h1 := Terrain.h(p.x, p.z)
@@ -2336,10 +2448,12 @@ func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
 	# No walking off a ledge. The river is 6 m below the bridge deck and there was
 	# no downward check, so a unit nudged at the bridge lip stepped into the water
 	# and then had no legal route out of a cell A* refuses to start from.
-	if from_h - h1 > 2.45:
-		return false                                # too high to climb
-	if from_h - h1 > Terrain.STEP_DOWN:
-		return false                                # do not walk off the parapet
+	# STEP_DOWN (1.1 m) used to block this, which meant anything that got onto
+	# the keep platform or the wall walk could never come down again: a
+	# permanent trap, and the reason units were "stuck in base". A body can drop;
+	# the river is still protected because water is not walkable at all.
+	if from_h - h1 > 5.2:
+		return false
 	if solid_dirty and use_solid_grid:
 		_rebuild_solid_grid()
 	if not use_solid_grid:
@@ -2370,6 +2484,11 @@ func _can_step(p: Vector3, from_h: float, rad: float, team: int = -1) -> bool:
 		if tag != "" and team >= 0 and tag == "gate%d" % team:
 			continue                                # your own gate opens for you
 		if rr.grow(rad).has_point(Vector2(p.x, p.z)):
+			# If we are already standing inside this solid we must be allowed to
+			# leave it. Otherwise a deck that overlaps its own wall column is a
+			# life sentence: that is what trapped units on the shrine platform.
+			if rr.grow(rad * 0.6).has_point(Vector2(from_p.x, from_p.z)):
+				continue
 			return false
 	return true
 
@@ -3433,7 +3552,31 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	elif u.has_waypoint:
 		goal = u.waypoint
 	else:
+		# The brain gave this unit nothing. Never stand in the courtyard: take
+		# the enemy gate as a default job so a brain hole cannot freeze a team.
+		u.idle_t += dt
+		if u.idle_t > 0.5:
+			u.idle_t = 0.0
+			u.waypoint = gates[1 - u.team]["pos"]
+			u.has_waypoint = true
 		return Vector3.ZERO
+
+	# Leaving (or entering) a castle is one straight trip down an open courtyard
+	# through one door. Route it directly and skip the path/stuck machinery:
+	# cell snapping at the plateau lip made units ping-pong on the threshold and
+	# an entire team never got out of its own base.
+	if not chasing:
+		var cur_castle: int = _castle_of(u.pos)
+		if cur_castle != -1 and _castle_of(goal) != cur_castle:
+			var out_pt: Vector3 = _gate_out(cur_castle)
+			var dd := Vector3(out_pt.x - u.pos.x, 0.0, out_pt.z - u.pos.z)
+			if dd.length() > 0.6:
+				u.stuck_t = 0.0
+				u.back_t = 0.0
+				u.path.clear()
+				u.path_i = 0
+				u.last_good = u.pos
+				return dd.normalized()
 
 	var flat := Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z)
 	if flat.length() < 0.5:
@@ -3493,6 +3636,9 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 
 	# no progress for a while (empty path or an unreachable tail): drop the goal
 	# so the brain picks a new one instead of leaning on a wall forever
+	if u.last_good.distance_to(u.pos) > 1.5:
+		u.stuck_t = 0.0
+		u.last_good = u.pos
 	if u.stuck_t > 2.4 or (u.path.is_empty() and u.stuck_t > 1.2):
 		u.has_waypoint = false
 		u.stuck_t = 0.0
@@ -3500,9 +3646,14 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 		return Vector3.ZERO
 
 	var target := goal
+	var goal_d: float = u.pos.distance_to(goal)
 	while u.path_i < u.path.size():
 		var wp: Vector3 = u.path[u.path_i]
-		if u.pos.distance_to(wp) < 0.75:
+		# Skip any waypoint that is no closer to the goal than we already are.
+		# A 1.4 m nav cell at the plateau lip snapped to a cell behind the unit,
+		# so the path began by walking backwards; the unit ping-ponged on the
+		# gate threshold for the whole match instead of leaving.
+		if u.pos.distance_to(wp) < 0.75 or wp.distance_to(goal) > goal_d + 0.3:
 			u.path_i += 1
 			continue
 		target = wp
@@ -3517,9 +3668,12 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	if u.target_unit != null and is_instance_valid(u.target_unit):
 		var th: float = Terrain.h(u.target_unit.pos.x, u.target_unit.pos.z)
 		var uh: float = Terrain.h(u.pos.x, u.pos.z)
-		if absf(th - uh) > Terrain.STEP_UP:
-			var gap: float = u.pos.distance_to(u.target_unit.pos)
-			if gap < 3.2:
+		var gap_all: float = u.pos.distance_to(u.target_unit.pos)
+		# Only the "he is up on the ledge I cannot climb" case. Without the range
+		# limit this backed units away from enemies 80 m off, which is what made
+		# them shuffle back and forth at their own gate instead of leaving.
+		if gap_all < 8.0 and th - uh > Terrain.STEP_UP:
+			if gap_all < 3.2:
 				return Vector3.ZERO
 			var away := Vector3(u.pos.x - u.target_unit.pos.x, 0.0, u.pos.z - u.target_unit.pos.z)
 			if away.length() > 0.01:
@@ -3531,6 +3685,21 @@ func _ai_dir(u: Unit, dt: float) -> Vector3:
 	var dir := d2.normalized()
 	if chasing and u.pos.distance_to(goal) < 2.0:
 		dir = Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z).normalized()
+
+	# Never walk away from the goal for long: fall back to the straight line,
+	# which the terrain allows even when the grid snapped us somewhere silly.
+	var to_goal := Vector3(goal.x - u.pos.x, 0.0, goal.z - u.pos.z)
+	if to_goal.length() > 0.2:
+		to_goal = to_goal.normalized()
+		if dir.dot(to_goal) < -0.15:
+			u.back_t += dt
+			if u.back_t > 0.5:
+				dir = to_goal
+				u.path.clear()
+				u.path_i = 0
+				u.path_t = 0.8
+		else:
+			u.back_t = maxf(0.0, u.back_t - dt * 2.0)
 
 	# last resort when wedged against another body: sidestep once
 	if u.stuck_t > 1.2:
@@ -3937,6 +4106,7 @@ func _write_telemetry(dt: float) -> void:
 			"wp": [snappedf(u.waypoint.x, 0.1), snappedf(u.waypoint.z, 0.1)], "has_wp": u.has_waypoint,
 			"path": u.path.size(), "pi": u.path_i, "stuck": snappedf(u.stuck_t, 0.1),
 			"tgt": u.target_unit != null, "carry": u.carrying != null, "key": u.has_key,
+			"fail": Nav.last_fail,
 			"cake": u.cake, "in_nav": Nav.cell_of(u.pos) >= 0 and Nav.cells.size() > 0 and Nav.cells[Nav.cell_of(u.pos)] == 1,
 		}
 		telemetry_file.store_line(JSON.stringify(line))
